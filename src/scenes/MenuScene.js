@@ -10,19 +10,22 @@ export class MenuScene extends Phaser.Scene {
     }
 
     create() {
-        const cx = this.cameras.main.centerX;
+        const W = this.cameras.main.width;
+        const H = this.cameras.main.height;
+        const cx = W / 2;
+        const cy = H / 2;
         
         // Background
-        const bg = this.add.image(cx, this.cameras.main.centerY, 'menu_bg');
-        const scaleX = 640 / bg.width;
-        const scaleY = 780 / bg.height;
-        bg.setScale(Math.max(scaleX, scaleY) || 1); // Fallback to 1 if image is not fully loaded immediately
+        const bg = this.add.image(cx, cy, 'menu_bg');
+        const scaleX = W / bg.width;
+        const scaleY = H / bg.height;
+        bg.setScale(Math.max(scaleX, scaleY) || 1);
 
         // Dark overlay for readability
-        this.add.rectangle(0, 0, 640, 780, 0x000000, 0.45).setOrigin(0);
+        this.add.rectangle(0, 0, W, H, 0x000000, 0.45).setOrigin(0);
 
         // Title
-        this.add.text(cx, 150, 'LUDO ONLINE', {
+        this.add.text(cx, H * 0.18, 'LUDO ONLINE', {
             fontSize: '54px',
             fontFamily: 'Arial',
             fontWeight: 'bold',
@@ -30,23 +33,22 @@ export class MenuScene extends Phaser.Scene {
             shadow: { offsetX: 3, offsetY: 3, color: '#000', blur: 5, fill: true }
         }).setOrigin(0.5);
 
-        this.add.text(cx, 220, 'Escolha o Modo de Jogo', {
+        this.add.text(cx, H * 0.28, 'Escolha o Modo de Jogo', {
             fontSize: '24px',
             fill: '#888888'
         }).setOrigin(0.5);
 
         // Buttons
-        this.createButton(cx, 350, 'Jogar contra I.A.', '#4CAF50', () => {
-            this.scene.start('GameScene', { mode: 'IA' });
+        this.createButton(cx, H * 0.44, 'Jogar contra I.A.', '#4CAF50', () => {
+            this.scene.start('ColorPickScene', { mode: 'IA' });
         });
 
-        this.createButton(cx, 450, 'Multiplayer Online', '#2196F3', () => {
-            // alert('Em breve integração com Supabase!');
-            this.scene.start('GameScene', { mode: 'MULTIPLAYER' });
+        this.createButton(cx, H * 0.57, 'Multiplayer Online', '#2196F3', () => {
+            this.scene.start('ColorPickScene', { mode: 'MULTIPLAYER' });
         });
 
-        this.createButton(cx, 550, 'Multiplayer Local', '#FF9800', () => {
-            this.scene.start('GameScene', { mode: 'LOCAL' });
+        this.createButton(cx, H * 0.70, 'Multiplayer Local', '#FF9800', () => {
+            this.scene.start('ColorPickScene', { mode: 'LOCAL' });
         });
     }
 

@@ -11,6 +11,7 @@ export class GameScene extends Phaser.Scene {
 
     init(data) {
         this.mode = data?.mode || 'IA';
+        this.playerColor = data?.playerColor || 'RED'; // The human player's color
     }
 
     preload() {
@@ -18,27 +19,35 @@ export class GameScene extends Phaser.Scene {
     }
 
     create() {
-        const cx = this.cameras.main.centerX;
-        const cy = this.cameras.main.centerY;
+        const W = this.cameras.main.width;
+        const H = this.cameras.main.height;
+        const cx = W / 2;
+        const cy = H / 2;
         
         // Background
         const bg = this.add.image(cx, cy, 'game_bg');
-        const scaleX = 640 / bg.width;
-        const scaleY = 780 / bg.height;
+        const scaleX = W / bg.width;
+        const scaleY = H / bg.height;
         bg.setScale(Math.max(scaleX, scaleY) || 1);
         
         // Dark overlay so the main playing board stands out clearly
-        this.add.rectangle(0, 0, 640, 780, 0x000000, 0.5).setOrigin(0);
+        this.add.rectangle(0, 0, W, H, 0x000000, 0.5).setOrigin(0);
 
         this.logic = new LudoLogic();
         this.ai = new LudoAI(this.logic);
         
         if (this.mode === 'IA') {
-            this.aiPlayers = ['BLUE', 'YELLOW', 'GREEN'];
+            // AI plays all colors except the one the human chose
+            const allColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+            this.aiPlayers = allColors.filter(c => c !== this.playerColor);
         } else {
-            // Both LOCAL and MULTIPLAYER have empty aiPlayers for now
             this.aiPlayers = [];
         }
+
+        const boardSize = 15 * BOARD_CONFIG.CELL_SIZE; // 600px
+        this.boardX = Math.floor((W - boardSize) / 2);
+        this.boardY = Math.floor((H - boardSize) / 2);
+        this.diceY = this.boardY + boardSize + 40; // dice below board
 
         this.drawBoard();
         this.createDiceUI();
@@ -65,7 +74,7 @@ export class GameScene extends Phaser.Scene {
     drawBoard() {
         const { CELL_SIZE } = BOARD_CONFIG;
         const graphics = this.add.graphics();
-        graphics.setPosition(20, 60);
+        graphics.setPosition(this.boardX, this.boardY);
 
         // Board Shadow
         graphics.fillStyle(0x000000, 0.4);
@@ -261,9 +270,11 @@ export class GameScene extends Phaser.Scene {
 
 
     createDiceUI() {
-        this.diceShadow = this.add.ellipse(320, 740, 50, 15, 0x000000, 0.5);
+        const diceX = this.cameras.main.centerX;
+        const diceY = this.diceY;
+        this.diceShadow = this.add.ellipse(diceX, diceY + 25, 50, 15, 0x000000, 0.5);
         
-        this.rollButtonContainer = this.add.container(320, 715);
+        this.rollButtonContainer = this.add.container(diceX, diceY);
         
         const diceBg = this.add.graphics();
         diceBg.fillStyle(0xffffff, 1);
@@ -295,7 +306,7 @@ export class GameScene extends Phaser.Scene {
         if (this.rollButtonContainer) {
             this.rollButtonContainer.angle = 0;
             this.rollButtonContainer.setScale(1);
-            this.rollButtonContainer.y = 715;
+            this.rollButtonContainer.y = this.diceY;
             if (this.diceShadow) {
                 this.diceShadow.setScale(1);
                 this.diceShadow.setAlpha(0.5);
@@ -414,7 +425,7 @@ export class GameScene extends Phaser.Scene {
             // tiny bounce on landing
             this.tweens.add({
                 targets: this.rollButtonContainer,
-                y: 710,
+                y: this.diceY + 3,
                 duration: 60,
                 yoyo: true,
                 ease: 'Sine.easeInOut'
@@ -423,11 +434,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     getVisualPosition(color, pos, index) {
+        const { CELL_SIZE } = BOARD_CONFIG;
         const coords = getCoordinates(color, pos, index);
-        // +20 pixel to center in the 40x40 cell, +20 pixel padding for the board + 40 for shift
         return {
-            x: coords.x * 40 + 40,
-            y: coords.y * 40 + 80, // Board is at y:60 now, +20 = 80
+            x: this.boardX + coords.x * CELL_SIZE + CELL_SIZE / 2,
+            y: this.boardY + coords.y * CELL_SIZE + CELL_SIZE / 2,
             gridX: coords.x,
             gridY: coords.y
         };
@@ -766,12 +777,13 @@ export class GameScene extends Phaser.Scene {
         if (!this.statusLabels) {
             this.statusLabels = {};
             const { CELL_SIZE } = BOARD_CONFIG;
-            const bX = 20; const bY = 60; // Board position
+            const bX = this.boardX;
+            const bY = this.boardY;
             const bases = {
-                BLUE:   { x: bX + 3*CELL_SIZE, y: bY + 3*CELL_SIZE, name: 'AZUL' },
-                YELLOW: { x: bX + 12*CELL_SIZE, y: bY + 3*CELL_SIZE, name: 'AMARELO' },
-                RED:    { x: bX + 3*CELL_SIZE, y: bY + 12*CELL_SIZE, name: 'VERMELHO' },
-                GREEN:  { x: bX + 12*CELL_SIZE, y: bY + 12*CELL_SIZE, name: 'VERDE' },
+                BLUE:   { x: bX + 2.5 * CELL_SIZE, y: bY + 2.5 * CELL_SIZE, name: 'AZUL' },
+                YELLOW: { x: bX + 12.5 * CELL_SIZE, y: bY + 2.5 * CELL_SIZE, name: 'AMARELO' },
+                RED:    { x: bX + 2.5 * CELL_SIZE, y: bY + 12.5 * CELL_SIZE, name: 'VERMELHO' },
+                GREEN:  { x: bX + 12.5 * CELL_SIZE, y: bY + 12.5 * CELL_SIZE, name: 'VERDE' },
             };
             ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(c => {
                 // Active action tag

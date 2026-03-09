@@ -1,17 +1,20 @@
 import { MenuScene } from './scenes/MenuScene';
+import { ColorPickScene } from './scenes/ColorPickScene';
 import { GameScene } from './scenes/GameScene';
 
 const config = {
     type: Phaser.AUTO,
-    width: 640,
-    height: 780,
+    width: window.innerWidth,
+    height: window.innerHeight,
     parent: 'app',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#000000',
     scale: {
-        mode: Phaser.Scale.FIT,
-        autoCenter: Phaser.Scale.CENTER_BOTH
+        mode: Phaser.Scale.RESIZE,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+        width: '100%',
+        height: '100%'
     },
-    scene: [MenuScene, GameScene]
+    scene: [MenuScene, ColorPickScene, GameScene]
 };
 
 new Phaser.Game(config);
