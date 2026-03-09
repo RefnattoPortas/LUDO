@@ -1,0 +1,34 @@
+{
+  "name": "ludo",
+  "private": true,
+  "version": "1.0.0",
+  "author": "Ludo Dev",
+  "description": "Ludo Online",
+  "main": "electron.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:start": "npm run build && electron .",
+    "electron:build": "npm run build && electron-builder -w"
+  },
+  "build": {
+    "appId": "com.ludo.game",
+    "productName": "Ludo Online",
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  },
+  "devDependencies": {
+    "vite": "^7.3.1",
+    "electron": "^29.1.5",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  }
+}
