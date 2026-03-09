@@ -83,8 +83,14 @@ export class LudoLogic {
     checkCaptures(movingPlayer, pos, perform = true) {
         if (pos > 52) return []; // Cannot capture if in home stretch
 
-        const safePositions = [1, 14, 27, 40];
-        if (safePositions.includes(pos)) return [];
+        // Fixed safe positions (starts) + visual safe squares (5 houses before each exit)
+        // Global positions 47 = 5 before RED exit (global 52)
+        // Detected by: global = (start + pos - 1) % 52
+        // RED start=0: global47 → pos=48 | BLUE start=13: global47 → pos=35 | YELLOW start=26: pos=22 | GREEN start=39: pos=9
+        const safeGlobal = new Set([0, 13, 26, 39, 47]); // starts + 5-before-exit global
+        const starts = { RED: 0, BLUE: 13, YELLOW: 26, GREEN: 39 };
+        const movingGlobal = (starts[movingPlayer] + pos - 1) % 52;
+        if (safeGlobal.has(movingGlobal)) return [];
 
         let captures = [];
         Object.keys(this.pieces).forEach(color => {
