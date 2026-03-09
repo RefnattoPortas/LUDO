@@ -44,10 +44,19 @@ export class GameScene extends Phaser.Scene {
             this.aiPlayers = [];
         }
 
-        const boardSize = 15 * BOARD_CONFIG.CELL_SIZE; // 600px
-        this.boardX = Math.floor((W - boardSize) / 2);
-        this.boardY = Math.floor((H - boardSize) / 2);
-        this.diceY = this.boardY + boardSize + 40; // dice below board
+        const baseBoardSize = 15 * BOARD_CONFIG.CELL_SIZE; // 600px
+        
+        // Calculate dynamic scale: allow 92% of screen width on small devices
+        this.mainScale = Math.min(1, (W * 0.92) / baseBoardSize);
+        // Also ensure it fits vertically
+        if (H < baseBoardSize + 150) {
+            this.mainScale = Math.min(this.mainScale, (H * 0.7) / baseBoardSize);
+        }
+
+        const scaledBoardSize = baseBoardSize * this.mainScale;
+        this.boardX = (W - scaledBoardSize) / 2;
+        this.boardY = (H - scaledBoardSize) / 2 - (20 * this.mainScale);
+        this.diceY = this.boardY + scaledBoardSize + (50 * this.mainScale);
 
         this.drawBoard();
         this.createDiceUI();
@@ -75,6 +84,7 @@ export class GameScene extends Phaser.Scene {
         const { CELL_SIZE } = BOARD_CONFIG;
         const graphics = this.add.graphics();
         graphics.setPosition(this.boardX, this.boardY);
+        graphics.setScale(this.mainScale);
 
         // Board Shadow
         graphics.fillStyle(0x000000, 0.4);
@@ -272,9 +282,10 @@ export class GameScene extends Phaser.Scene {
     createDiceUI() {
         const diceX = this.cameras.main.centerX;
         const diceY = this.diceY;
-        this.diceShadow = this.add.ellipse(diceX, diceY + 25, 50, 15, 0x000000, 0.5);
+        this.diceShadow = this.add.ellipse(diceX, diceY + (25 * this.mainScale), 50 * this.mainScale, 15 * this.mainScale, 0x000000, 0.5);
         
         this.rollButtonContainer = this.add.container(diceX, diceY);
+        this.rollButtonContainer.setScale(this.mainScale);
         
         const diceBg = this.add.graphics();
         diceBg.fillStyle(0xffffff, 1);
@@ -305,7 +316,7 @@ export class GameScene extends Phaser.Scene {
         if (this.diceFace) this.diceFace.clear();
         if (this.rollButtonContainer) {
             this.rollButtonContainer.angle = 0;
-            this.rollButtonContainer.setScale(1);
+            this.rollButtonContainer.setScale(this.mainScale);
             this.rollButtonContainer.y = this.diceY;
             if (this.diceShadow) {
                 this.diceShadow.setScale(1);
@@ -425,7 +436,7 @@ export class GameScene extends Phaser.Scene {
             // tiny bounce on landing
             this.tweens.add({
                 targets: this.rollButtonContainer,
-                y: this.diceY + 3,
+                y: this.diceY + (3 * this.mainScale),
                 duration: 60,
                 yoyo: true,
                 ease: 'Sine.easeInOut'
@@ -437,8 +448,8 @@ export class GameScene extends Phaser.Scene {
         const { CELL_SIZE } = BOARD_CONFIG;
         const coords = getCoordinates(color, pos, index);
         return {
-            x: this.boardX + coords.x * CELL_SIZE + CELL_SIZE / 2,
-            y: this.boardY + coords.y * CELL_SIZE + CELL_SIZE / 2,
+            x: this.boardX + (coords.x * CELL_SIZE + CELL_SIZE / 2) * this.mainScale,
+            y: this.boardY + (coords.y * CELL_SIZE + CELL_SIZE / 2) * this.mainScale,
             gridX: coords.x,
             gridY: coords.y
         };
@@ -450,6 +461,7 @@ export class GameScene extends Phaser.Scene {
             this.pieceSprites[color] = this.logic.pieces[color].map((pos, i) => {
                 const vis = this.getVisualPosition(color, pos, i);
                 const container = this.add.container(vis.x, vis.y);
+                container.setScale(this.mainScale);
                 
                 // Highlight Glow
                 const glow = this.add.circle(0, 0, 20, 0xffffff, 0);
@@ -797,7 +809,7 @@ export class GameScene extends Phaser.Scene {
                     backgroundColor: colorHex,
                     padding: { x: 12, y: 6 },
                     shadow: { color: '#000', fill: true, offsetX: 2, offsetY: 2, blur: 5 }
-                }).setOrigin(0.5).setDepth(20).setVisible(false);
+                }).setOrigin(0.5).setDepth(20).setVisible(false).setScale(this.mainScale);
                 
                 // Add border to active tag
                 const activeBorder = this.add.graphics().setDepth(19);
