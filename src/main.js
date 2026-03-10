@@ -1,5 +1,6 @@
 import { MenuScene } from './scenes/MenuScene';
 import { ColorPickScene } from './scenes/ColorPickScene';
+import { LobbyScene } from './scenes/LobbyScene';
 import { GameScene } from './scenes/GameScene';
 
 const config = {
@@ -14,7 +15,7 @@ const config = {
         width: '100%',
         height: '100%'
     },
-    scene: [MenuScene, ColorPickScene, GameScene]
+    scene: [MenuScene, ColorPickScene, LobbyScene, GameScene]
 };
 
 new Phaser.Game(config);

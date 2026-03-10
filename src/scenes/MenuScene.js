@@ -44,7 +44,7 @@ export class MenuScene extends Phaser.Scene {
         });
 
         this.createButton(cx, H * 0.57, 'Multiplayer Online', '#2196F3', () => {
-            this.scene.start('ColorPickScene', { mode: 'MULTIPLAYER' });
+            this.scene.start('LobbyScene');
         });
 
         this.createButton(cx, H * 0.70, 'Multiplayer Local', '#FF9800', () => {
