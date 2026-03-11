@@ -17,7 +17,7 @@ export class GameScene extends Phaser.Scene {
         this.roomId = data?.roomId;
         this.joinedRoom = this.roomId ? { id: this.roomId } : null;
         this.myColor = data?.playerColor;
-        this.turnDuration = 7000; // 7 seconds
+        this.turnDuration = 10000; // 10 seconds
         
         // Safety fallback if data is missing or corrupted
         if (!Array.isArray(this.activePlayers) || this.activePlayers.length === 0) {
@@ -109,7 +109,7 @@ export class GameScene extends Phaser.Scene {
 
     startTurnTimer() {
         if (this.turnTimer) this.turnTimer.remove();
-        this.timeLeft = 7;
+        this.timeLeft = 10;
         
         const turnColor = this.logic.turn;
         const isAI = this.aiPlayers.includes(turnColor);
@@ -117,14 +117,14 @@ export class GameScene extends Phaser.Scene {
         const showLabel = !isAI;
 
         if (this.timerLabel) {
-            this.timerLabel.setText('7');
+            this.timerLabel.setText('10');
             this.timerLabel.setVisible(showLabel);
             this.timerLabel.setScale(this.mainScale);
         }
 
         this.turnTimer = this.time.addEvent({
             delay: 1000,
-            repeat: 6,
+            repeat: 9,
             callback: () => {
                 this.timeLeft--;
                 if (this.timerLabel && showLabel) {
@@ -161,18 +161,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     goToNextTurn() {
-        // 1 second delay between turns
-        this.time.delayedCall(1000, () => {
-            this.logic.nextTurn();
-            
-            if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
-            }
-            
-            this.updateStatusText();
-            this.startTurnTimer();
-            this.checkAITurn();
-        });
+        // Delay removed, transition immediately
+        this.logic.nextTurn();
+        
+        if (this.mode === 'ONLINE') {
+            this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
+        }
+        
+        this.updateStatusText();
+        this.startTurnTimer();
+        this.checkAITurn();
     }
 
     onOnlineUpdate(state) {
@@ -446,7 +444,7 @@ export class GameScene extends Phaser.Scene {
         this.rollButtonContainer.on('pointerdown', () => this.handleRoll());
 
         // New Timer Label to the right of the Dice
-        this.timerLabel = this.add.text(diceX + (75 * this.mainScale), diceY, '7', {
+        this.timerLabel = this.add.text(diceX + (75 * this.mainScale), diceY, '10', {
             fontSize: `${45 * this.mainScale}px`,
             fontFamily: 'Arial Black, Arial, sans-serif',
             fill: '#ffffff',
@@ -796,38 +794,64 @@ export class GameScene extends Phaser.Scene {
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
         const colorNameMap = { RED: 'VERMELHO', BLUE: 'AZUL', YELLOW: 'AMARELO', GREEN: 'VERDE' };
+        const darkColor = DARK_COLORS[winner] || 0x333333;
+
+        // Victory Background (same style as status banner)
+        const vicBg = this.add.graphics().setDepth(199).setScale(0);
         
         // Victory Text
         const vicText = this.add.text(cx, cy, `VITÓRIA DO\nJOGADOR ${colorNameMap[winner]}!`, {
-            fontSize: '64px',
+            fontSize: '52px',
             fontFamily: 'Arial Black',
-            fill: '#fff',
-            stroke: '#000',
-            strokeThickness: 8,
-            align: 'center'
+            fill: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 10,
+            align: 'center',
+            padding: { x: 40, y: 30 }
         }).setOrigin(0.5).setScale(0).setDepth(200);
 
-        // Confetti effect (simple particles)
+        // Draw Background
+        const width = vicText.width + 20;
+        const height = vicText.height + 20;
+        vicBg.setPosition(cx, cy);
+        vicBg.fillStyle(darkColor, 0.75); // Slightly more opaque for victory
+        vicBg.fillRoundedRect(-width/2, -height/2, width, height, 20);
+        vicBg.lineStyle(5, darkColor, 1);
+        vicBg.strokeRoundedRect(-width/2, -height/2, width, height, 20);
+
+        // Confetti effect
         const emitter = this.add.particles(0, 0, 'particle_dot', {
             x: { min: 0, max: this.cameras.main.width },
             y: -20,
-            lifespan: 2000,
-            speedY: { min: 200, max: 400 },
-            scale: { start: 0.1, end: 0 },
+            lifespan: 3000,
+            speedY: { min: 200, max: 500 },
+            speedX: { min: -50, max: 50 },
+            scale: { start: 0.15, end: 0 },
             alpha: { start: 1, end: 0 },
-            tint: [0xff0000, 0x00ff00, 0x0000ff, 0xffff00],
-            frequency: 50,
+            tint: [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xffffff],
+            frequency: 30,
             blendMode: 'ADD'
         });
 
+        // Intro animation
         this.tweens.add({
-            targets: vicText,
+            targets: [vicText, vicBg],
             scale: 1,
             angle: 360,
-            duration: 1000,
+            duration: 1200,
             ease: 'Back.easeOut',
             onComplete: () => {
-                this.time.delayedCall(3000, () => {
+                // Pulse effect
+                this.tweens.add({
+                    targets: [vicText, vicBg],
+                    scale: 1.05,
+                    duration: 500,
+                    yoyo: true,
+                    repeat: -1,
+                    ease: 'Sine.easeInOut'
+                });
+
+                this.time.delayedCall(4000, () => {
                     this.scene.start('MenuScene');
                 });
             }

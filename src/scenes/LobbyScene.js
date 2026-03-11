@@ -262,10 +262,12 @@ export class LobbyScene extends Phaser.Scene {
         
         const takenColors = existingPlayers?.map(p => p.color) || [];
         
-        // Custom Rule: If 2 players, use RED and YELLOW
+        // Custom Rule: 2-player room color pairs
         let availableColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
-        if (room.max_players === 2) {
+        if (room.id === 1) {
             availableColors = ['RED', 'YELLOW'];
+        } else if (room.id === 2) {
+            availableColors = ['BLUE', 'GREEN'];
         }
 
         this.myColor = availableColors.find(c => !takenColors.includes(c));
