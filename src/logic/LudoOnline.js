@@ -9,13 +9,13 @@ export class LudoOnline {
     }
 
     async joinRoom(color) {
-        // 1. Insert player into ludo_players
-        const { data, error } = await supabase
+        // 1. Update player in ludo_players (already inserted by LobbyScene)
+        const { error } = await supabase
             .from('ludo_players')
-            .upsert({ room_id: this.roomId, color, last_active: new Date() })
-            .select();
+            .update({ last_active: new Date() })
+            .match({ room_id: this.roomId, color });
         
-        if (error) throw error;
+        if (error) console.warn('Supabase player update error:', error);
 
         // 2. Subscribe to REALTIME game_state changes
         this.subscription = supabase

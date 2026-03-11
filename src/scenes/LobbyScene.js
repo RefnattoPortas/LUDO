@@ -58,6 +58,15 @@ export class LobbyScene extends Phaser.Scene {
             .on('postgres_changes', { event: '*', schema: 'public', table: 'ludo_rooms' }, () => this.refreshRooms())
             .on('postgres_changes', { event: '*', schema: 'public', table: 'ludo_players' }, () => this.onPlayerUpdate())
             .subscribe();
+
+        // Handle page close/refresh to clean up
+        this._unloadLobby = () => {
+            if (this.joinedRoom && this.myColor) {
+               // Fire-and-forget deletion
+               supabase.from('ludo_players').delete().match({ room_id: this.joinedRoom.id, color: this.myColor }).then();
+            }
+        };
+        window.addEventListener('beforeunload', this._unloadLobby);
     }
 
     createWaitingOverlay(cx, cy, W, H) {
@@ -330,5 +339,6 @@ export class LobbyScene extends Phaser.Scene {
 
     shutdown() {
         if (this.roomChannel) supabase.removeChannel(this.roomChannel);
+        if (this._unloadLobby) window.removeEventListener('beforeunload', this._unloadLobby);
     }
 }

@@ -100,6 +100,15 @@ export class GameScene extends Phaser.Scene {
         if (this.mode === 'ONLINE' && this.roomId) {
             this.online = new LudoOnline(this.roomId, (state) => this.onOnlineUpdate(state));
             this.online.joinRoom(this.playerColor);
+            
+            this._unloadGame = () => {
+                this.online.leaveRoom(this.playerColor);
+            };
+            window.addEventListener('beforeunload', this._unloadGame);
+            
+            this.events.on('shutdown', () => {
+                window.removeEventListener('beforeunload', this._unloadGame);
+            });
         } else {
             this.checkAITurn();
         }
