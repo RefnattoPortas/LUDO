@@ -15,6 +15,8 @@ export class GameScene extends Phaser.Scene {
         this.playerColor = data?.playerColor || 'RED';
         this.activePlayers = data?.activePlayers;
         this.roomId = data?.roomId;
+        this.joinedRoom = this.roomId ? { id: this.roomId } : null;
+        this.myColor = data?.playerColor;
         this.turnDuration = 7000; // 7 seconds
         
         // Safety fallback if data is missing or corrupted
@@ -111,12 +113,12 @@ export class GameScene extends Phaser.Scene {
         
         const turnColor = this.logic.turn;
         const isAI = this.aiPlayers.includes(turnColor);
-        // Only show if it's a local human or it's my turn online
-        const isMyAction = !isAI && (this.mode !== 'ONLINE' || turnColor === this.playerColor);
+        // Show for all human players in Online mode, or current player in Local
+        const showLabel = !isAI;
 
         if (this.timerLabel) {
             this.timerLabel.setText('7');
-            this.timerLabel.setVisible(isMyAction);
+            this.timerLabel.setVisible(showLabel);
             this.timerLabel.setScale(this.mainScale);
         }
 
@@ -125,9 +127,11 @@ export class GameScene extends Phaser.Scene {
             repeat: 6,
             callback: () => {
                 this.timeLeft--;
-                if (this.timerLabel && isMyAction) {
+                if (this.timerLabel && showLabel) {
                     this.timerLabel.setText(this.timeLeft.toString());
                     // Pop animation
+                    if (this.timeLeft <= 3) this.timerLabel.setTint(0xff0000);
+                    else this.timerLabel.setTint(0xffffff);
                     this.timerLabel.setScale(this.mainScale * 1.5);
                     this.tweens.add({
                         targets: this.timerLabel,
@@ -174,26 +178,39 @@ export class GameScene extends Phaser.Scene {
     onOnlineUpdate(state) {
         if (!state) return;
         
-        // Only update if it's not our local move causing it (optional but safer)
         const isDiferentTurn = state.current_turn !== this.logic.turn;
-        const isDifferentDice = state.last_dice_roll !== this.logic.diceRoll;
+        const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
         const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
 
-        if (isDiferentTurn || isDifferentDice || isDifferentPieces) {
+        // If I am the sender, I already have the state updated locally.
+        // If I am the receiver, I need to apply these changes.
+        if (state.current_turn === this.playerColor) {
+            // I am the active player, I trust my local state more unless I just joined
+            // or there's a major desync. For now, let's just sync turn if it changed.
+            if (isDiferentTurn) {
+                this.logic.turn = state.current_turn;
+                this.updateStatusText();
+                this.startTurnTimer();
+            }
+            return; 
+        }
+
+        // I am the receiver (not my turn)
+        if (isDiferentTurn || isNewRoll || isDifferentPieces) {
+            const oldRoll = this.logic.diceRoll;
             this.logic.turn = state.current_turn;
             this.logic.diceRoll = state.last_dice_roll;
             this.logic.pieces = state.pieces;
             
             this.updateAllPiecePositions(false);
             this.updateStatusText();
-            this.drawDiceFace(this.logic.diceRoll);
             
-            if (this.logic.diceRoll > 0 && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                this.logic.gameState = 'WAITING_FOR_MOVE';
+            if (isNewRoll) {
+                this.processRoll(state.last_dice_roll);
+            } else {
+                this.drawDiceFace(this.logic.diceRoll);
+                this.startTurnTimer();
             }
-            
-            // Restart timer on state update for everyone
-            this.startTurnTimer();
         }
     }
 

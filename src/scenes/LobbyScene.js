@@ -103,24 +103,43 @@ export class LobbyScene extends Phaser.Scene {
 
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
-        const gridY = cy + 40;
-        const spacingX = 220;
-        const spacingY = 220;
+        const W = this.cameras.main.width;
+        const H = this.cameras.main.height;
 
-        const positions = [
-            { x: cx - spacingX/2, y: gridY - spacingY/2 },
-            { x: cx + spacingX/2, y: gridY - spacingY/2 },
-            { x: cx - spacingX/2, y: gridY + spacingY/2 },
-            { x: cx + spacingX/2, y: gridY + spacingY/2 }
-        ];
+        const isMobile = W < H || W < 600;
 
-        rooms.forEach((room, i) => {
-            if (i >= positions.length) return;
-            const playerCount = room.ludo_players?.length || 0;
-            const status = playerCount >= room.max_players ? 'CHEIA' : room.status || 'LIVRE';
-            const card = this.createRoomCard(positions[i].x, positions[i].y, { ...room, playerCount, status });
-            this.roomsContainer.add(card);
-        });
+        if (isMobile) {
+            // List Layout (Mobile)
+            const listStartY = cy - 120;
+            const itemSpacingY = 110;
+
+            rooms.forEach((room, i) => {
+                const playerCount = room.ludo_players?.length || 0;
+                const status = playerCount >= room.max_players ? 'CHEIA' : room.status || 'LIVRE';
+                const card = this.createRoomCardList(cx, listStartY + (i * itemSpacingY), { ...room, playerCount, status });
+                this.roomsContainer.add(card);
+            });
+        } else {
+            // Grid Layout (PC/Landscape)
+            const gridY = cy + 40;
+            const spacingX = 220;
+            const spacingY = 220;
+
+            const positions = [
+                { x: cx - spacingX/2, y: gridY - spacingY/2 },
+                { x: cx + spacingX/2, y: gridY - spacingY/2 },
+                { x: cx - spacingX/2, y: gridY + spacingY/2 },
+                { x: cx + spacingX/2, y: gridY + spacingY/2 }
+            ];
+
+            rooms.forEach((room, i) => {
+                if (i >= positions.length) return;
+                const playerCount = room.ludo_players?.length || 0;
+                const status = playerCount >= room.max_players ? 'CHEIA' : room.status || 'LIVRE';
+                const card = this.createRoomCard(positions[i].x, positions[i].y, { ...room, playerCount, status });
+                this.roomsContainer.add(card);
+            });
+        }
     }
 
     async onPlayerUpdate() {
@@ -186,6 +205,45 @@ export class LobbyScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         container.add([shadow, card, title, name, playersIcon, badgeText]);
+        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerdown', () => {
+            if (room.status === 'CHEIA') return;
+            this.joinRoom(room);
+        });
+
+        return container;
+    }
+
+    createRoomCardList(x, y, room) {
+        const container = this.add.container(x, y);
+        const w = 340, h = 90;
+
+        const shadow = this.add.graphics();
+        shadow.fillStyle(0x000000, 0.4);
+        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 4, w, h, 15);
+
+        const card = this.add.graphics();
+        card.fillStyle(0x1a1a2e, 0.5);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 15);
+
+        const color = room.status === 'EM JOGO' ? 0xFF9800 : room.status === 'CHEIA' ? 0xF44336 : 0x4CAF50;
+        card.lineStyle(2, color, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
+
+        const name = this.add.text(-w/2 + 20, 0, room.name, {
+            fontSize: '18px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0, 0.5);
+
+        const playerCount = this.add.text(w/2 - 80, 0, `${room.playerCount}/${room.max_players}`, {
+            fontSize: '24px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0.5);
+
+        const badgeText = this.add.text(w/2 - 35, 0, room.status, {
+            fontSize: '10px', fontFamily: 'Arial Black', fill: color
+        }).setOrigin(0.5).setAngle(90);
+
+        container.add([shadow, card, name, playerCount, badgeText]);
         container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
 
         container.on('pointerdown', () => {
