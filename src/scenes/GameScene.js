@@ -194,39 +194,56 @@ export class GameScene extends Phaser.Scene {
 
     onOnlineUpdate(state) {
         if (!state) return;
-        
+
         const isDiferentTurn = state.current_turn !== this.logic.turn;
         const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
         const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
 
-        // If I am the sender, I already have the state updated locally.
-        // If I am the receiver, I need to apply these changes.
         if (state.current_turn === this.playerColor) {
-            // I am the active player, I trust my local state more unless I just joined
-            // or there's a major desync. For now, let's just sync turn if it changed.
+            // I am the active player. Trust local state, but accept state if my turn JUST started
+            // or if pieces got corrupted/desynced while waiting.
             if (isDiferentTurn) {
                 this.logic.turn = state.current_turn;
+                this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
+                this.logic.diceRoll = state.last_dice_roll;
+                this.logic.gameState = 'WAITING_FOR_ROLL';
+                this.resetDice();
+                this.updateAllPiecePositions(false);
                 this.updateStatusText();
                 this.startTurnTimer();
+            } else if (isDifferentPieces && this.logic.gameState === 'WAITING_FOR_ROLL') {
+                this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
+                this.updateAllPiecePositions(true); // Jump instantly to avoid weirdness
             }
             return; 
         }
 
         // I am the receiver (not my turn)
         if (isDiferentTurn || isNewRoll || isDifferentPieces) {
-            const oldRoll = this.logic.diceRoll;
             this.logic.turn = state.current_turn;
             this.logic.diceRoll = state.last_dice_roll;
-            this.logic.pieces = state.pieces;
+            this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
             
+            this.clearHighlights(); // Clear any phantom highlights from their previous roll
             this.updateAllPiecePositions(false);
             this.updateStatusText();
             
             if (isNewRoll) {
-                this.processRoll(state.last_dice_roll);
-            } else {
+                this.resetDice();
                 this.drawDiceFace(this.logic.diceRoll);
+            } else if (this.logic.diceRoll > 0) {
+                this.drawDiceFace(this.logic.diceRoll);
+            } else {
+                this.resetDice();
+            }
+
+            if (isDiferentTurn || isNewRoll) {
                 this.startTurnTimer();
+            }
+
+            const winner = this.logic.checkWinner();
+            if (winner) {
+                this.handleVictory(winner);
             }
         }
     }
@@ -815,32 +832,41 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleVictory(winner) {
+        if (this.victoryTriggered) return;
+        this.victoryTriggered = true;
+
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
         const colorNameMap = { RED: 'VERMELHO', BLUE: 'AZUL', YELLOW: 'AMARELO', GREEN: 'VERDE' };
         const darkColor = DARK_COLORS[winner] || 0x333333;
 
+        // Make width exactly equal to scaled board size
+        const baseBoardSize = 15 * BOARD_CONFIG.CELL_SIZE;
+        const scaledBoardSize = baseBoardSize * this.mainScale;
+
         // Victory Background (same style as status banner)
         const vicBg = this.add.graphics().setDepth(199).setScale(0);
         
         // Victory Text
+        const fontSizeStr = Math.floor(45 * this.mainScale) + 'px';
         const vicText = this.add.text(cx, cy, `VITÓRIA DO\nJOGADOR ${colorNameMap[winner]}!`, {
-            fontSize: '52px',
+            fontSize: fontSizeStr,
             fontFamily: 'Arial Black',
             fill: '#ffffff',
             stroke: '#000000',
-            strokeThickness: 10,
+            strokeThickness: 8,
             align: 'center',
-            padding: { x: 40, y: 30 }
+            padding: { x: 20, y: 20 },
+            wordWrap: { width: scaledBoardSize * 0.9, useAdvancedWrap: true }
         }).setOrigin(0.5).setScale(0).setDepth(200);
 
         // Draw Background
-        const width = vicText.width + 20;
-        const height = vicText.height + 20;
+        const width = scaledBoardSize;
+        const height = vicText.height + 40;
         vicBg.setPosition(cx, cy);
-        vicBg.fillStyle(darkColor, 0.75); // Slightly more opaque for victory
+        vicBg.fillStyle(darkColor, 0.85); // Slightly more opaque for victory
         vicBg.fillRoundedRect(-width/2, -height/2, width, height, 20);
-        vicBg.lineStyle(5, darkColor, 1);
+        vicBg.lineStyle(6, 0xffffff, 1);
         vicBg.strokeRoundedRect(-width/2, -height/2, width, height, 20);
 
         // Confetti effect
