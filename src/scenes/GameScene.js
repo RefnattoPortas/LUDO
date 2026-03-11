@@ -118,7 +118,7 @@ export class GameScene extends Phaser.Scene {
 
     startTurnTimer() {
         if (this.turnTimer) this.turnTimer.remove();
-        this.timeLeft = 10;
+        this.timeLeft = 15;
         
         const turnColor = this.logic.turn;
         const isAI = this.aiPlayers.includes(turnColor);
@@ -126,14 +126,14 @@ export class GameScene extends Phaser.Scene {
         const showLabel = !isAI;
 
         if (this.timerLabel) {
-            this.timerLabel.setText('10');
+            this.timerLabel.setText('15');
             this.timerLabel.setVisible(showLabel);
             this.timerLabel.setScale(this.mainScale);
         }
 
         this.turnTimer = this.time.addEvent({
             delay: 1000,
-            repeat: 9,
+            repeat: 14,
             callback: () => {
                 this.timeLeft--;
                 if (this.timerLabel && showLabel) {
@@ -162,11 +162,21 @@ export class GameScene extends Phaser.Scene {
         if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) return;
         if (this.aiPlayers.includes(this.logic.turn)) return;
 
-        this.showTemporaryMessage(this.logic.turn, 'Tempo Esgotado!');
+        this.showTemporaryMessage(this.logic.turn, 'Auto\nJogando...');
         this.clearHighlights();
-        this.resetDice();
         
-        this.goToNextTurn();
+        if (this.logic.gameState === 'WAITING_FOR_ROLL') {
+            this.forceAITurn = true;
+            const value = this.logic.rollDice();
+            if (value) {
+                if (this.mode === 'ONLINE') {
+                    this.online.updateGame(this.logic.turn, value, this.logic.pieces);
+                }
+                this.processRoll(value);
+            }
+        } else {
+            this.handleAIMove();
+        }
     }
 
     goToNextTurn() {
@@ -453,7 +463,7 @@ export class GameScene extends Phaser.Scene {
         this.rollButtonContainer.on('pointerdown', () => this.handleRoll());
 
         // New Timer Label to the right of the Dice
-        this.timerLabel = this.add.text(diceX + (75 * this.mainScale), diceY, '10', {
+        this.timerLabel = this.add.text(diceX + (75 * this.mainScale), diceY, '15', {
             fontSize: `${45 * this.mainScale}px`,
             fontFamily: 'Arial Black, Arial, sans-serif',
             fill: '#ffffff',
@@ -526,6 +536,7 @@ export class GameScene extends Phaser.Scene {
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
+                    this.forceAITurn = false;
                     this.goToNextTurn();
                 });
                 return;
@@ -536,13 +547,17 @@ export class GameScene extends Phaser.Scene {
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
+                    this.forceAITurn = false;
                     this.goToNextTurn();
                 });
                 return;
             }
 
-            if (this.aiPlayers.includes(this.logic.turn)) {
-                this.time.delayedCall(600, () => this.handleAIMove());
+            if (this.aiPlayers.includes(this.logic.turn) || this.forceAITurn) {
+                this.time.delayedCall(600, () => {
+                    this.handleAIMove();
+                    this.forceAITurn = false;
+                });
             } else {
                 this.highlightPossibleMoves();
             }
