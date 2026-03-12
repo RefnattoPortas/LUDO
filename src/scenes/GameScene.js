@@ -660,6 +660,7 @@ export class GameScene extends Phaser.Scene {
                 const glow = this.add.circle(0, 0, 20, 0xffffff, 0);
                 glow.setStrokeStyle(4, 0xffff00);
                 glow.setName('glow');
+                glow.setVisible(false);
                 
                 // Drop shadow
                 const shadow = this.add.ellipse(0, 10, 24, 12, 0x000000, 0.3);
@@ -711,6 +712,7 @@ export class GameScene extends Phaser.Scene {
                 const container = this.pieceSprites[color][i];
                 const glow = container.getByName('glow');
                 if (glow) {
+                    glow.setVisible(true);
                     glow.setAlpha(1);
                     this.tweens.add({
                         targets: glow,
@@ -731,6 +733,7 @@ export class GameScene extends Phaser.Scene {
                 const glow = container.getByName('glow');
                 if (glow) {
                     this.tweens.killTweensOf(glow);
+                    glow.setVisible(false);
                     glow.setAlpha(0);
                     glow.setScale(1);
                 }

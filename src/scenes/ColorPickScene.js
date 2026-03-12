@@ -69,10 +69,10 @@ export class ColorPickScene extends Phaser.Scene {
         // Color cards — 2x2 grid
         const gridY = this.mode === 'LOCAL' ? cy + 60 : cy + 20;
         const positions = [
-            { x: cx - 110, y: gridY - 95 },
-            { x: cx + 110, y: gridY - 95 },
-            { x: cx - 110, y: gridY + 95 },
-            { x: cx + 110, y: gridY + 95 },
+            { x: cx - 88, y: gridY - 76 },
+            { x: cx + 88, y: gridY - 76 },
+            { x: cx - 88, y: gridY + 76 },
+            { x: cx + 88, y: gridY + 76 },
         ];
 
         this.cards = [];
@@ -92,19 +92,19 @@ export class ColorPickScene extends Phaser.Scene {
         this.countButtons = [];
 
         counts.forEach((num, i) => {
-            const btnX = x + (i - 1) * 110;
+            const btnX = x + (i - 1) * 88;
             const container = this.add.container(btnX, y);
             
             const bg = this.add.graphics();
             const txt = this.add.text(0, 0, `${num} Jog.`, {
-                fontSize: '16px',
+                fontSize: '13px',
                 fontFamily: 'Arial',
                 fontWeight: 'bold',
                 fill: '#ffffff'
             }).setOrigin(0.5);
 
             container.add([bg, txt]);
-            container.setInteractive(new Phaser.Geom.Rectangle(-45, -20, 90, 40), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+            container.setInteractive(new Phaser.Geom.Rectangle(-36, -16, 72, 32), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
             
             container.on('pointerdown', () => {
                 this.playerCount = num;
@@ -169,9 +169,9 @@ export class ColorPickScene extends Phaser.Scene {
             this.countButtons.forEach(btn => {
                 btn.bg.clear();
                 btn.bg.fillStyle(btn.num === this.playerCount ? 0x2196F3 : 0x333333, 1);
-                btn.bg.fillRoundedRect(-45, -20, 90, 40, 10);
+                btn.bg.fillRoundedRect(-36, -16, 72, 32, 8);
                 btn.bg.lineStyle(2, 0xffffff, btn.num === this.playerCount ? 1 : 0.3);
-                btn.bg.strokeRoundedRect(-45, -20, 90, 40, 10);
+                btn.bg.strokeRoundedRect(-36, -16, 72, 32, 8);
             });
         }
 
@@ -190,32 +190,33 @@ export class ColorPickScene extends Phaser.Scene {
 
     createColorCard(x, y, cd) {
         const container = this.add.container(x, y);
-        const w = 160, h = 180;
+        const w = 128, h = 144;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
-        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 6, w, h, 22);
+        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 5, w, h, 18);
 
         const card = this.add.graphics();
         card.fillStyle(0x1a1a2e, 0.5); // 50% transparency for local and IA modes
-        card.fillRoundedRect(-w/2, -h/2, w, h, 22);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 18);
         card.fillStyle(cd.hex, 0.9);
-        card.fillRoundedRect(-w/2, -h/2, w, 14, { tl: 22, tr: 22 });
-        card.lineStyle(3, cd.hex, 1);
-        card.strokeRoundedRect(-w/2, -h/2, w, h, 22);
+        card.fillRoundedRect(-w/2, -h/2, w, 11, { tl: 18, tr: 18 });
+        card.lineStyle(2.5, cd.hex, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 18);
 
         const pawn = this.drawPawn(cd.hex, cd.darkHex);
+        pawn.setScale(0.85);
 
-        const label = this.add.text(0, h/2 - 38, cd.label.toUpperCase(), {
-            fontSize: '16px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
+        const label = this.add.text(0, h/2 - 28, cd.label.toUpperCase(), {
+            fontSize: '13px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
         }).setOrigin(0.5);
 
-        const rankText = this.add.text(0, -h/2 + 35, '', {
-            fontSize: '14px', fontFamily: 'Arial Black, Arial', fill: '#4CAF50', fontWeight: 'bold'
+        const rankText = this.add.text(0, -h/2 + 25, '', {
+            fontSize: '11px', fontFamily: 'Arial Black, Arial', fill: '#4CAF50', fontWeight: 'bold'
         }).setOrigin(0.5).setVisible(false);
 
-        const btnLabel = this.add.text(0, h/2 - 11, '', {
-            fontSize: '11px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
+        const btnLabel = this.add.text(0, h/2 - 9, '', {
+            fontSize: '9px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
         }).setOrigin(0.5);
 
         const hoverOverlay = this.add.graphics();
