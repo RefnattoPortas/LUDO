@@ -93,7 +93,7 @@ export class LudoLogic {
     }
 
     checkCaptures(movingPlayer, pos, perform = true) {
-        if (pos > 52) return []; // Cannot capture if in home stretch
+        if (pos > 51) return []; // Cannot capture if in home stretch
 
         // Global safe positions (the ones drawn with arrows/stars in GameScene)
         // RED start=0, BLUE start=13, YELLOW start=26, GREEN start=39
@@ -109,8 +109,8 @@ export class LudoLogic {
             if (color === movingPlayer) return;
 
             this.pieces[color].forEach((otherPos, index) => {
-                // If on path, check logic overlap
-                if (otherPos > 0 && otherPos < 53 && this.isSameGlobalSquare(movingPlayer, pos, color, otherPos)) {
+                // If on path, check logic overlap (only common track 1-51 can capture/be captured)
+                if (otherPos > 0 && otherPos < 52 && this.isSameGlobalSquare(movingPlayer, pos, color, otherPos)) {
                     if (perform) {
                         this.pieces[color][index] = 0; // Send back to base
                     }

@@ -7,6 +7,9 @@ export class MenuScene extends Phaser.Scene {
 
     preload() {
         this.load.image('menu_bg', '/menu_bg.png');
+        this.load.image('lobby_bg_cartoon', '/lobby_bg_cartoon.png');
+        this.load.image('game_bg', '/game_bg.png');
+        this.load.image('color_pick_bg', '/color_pick_bg.png');
     }
 
     create() {
@@ -39,77 +42,85 @@ export class MenuScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Buttons
-        this.createButton(cx, H * 0.44, 'Jogar contra I.A.', '#4CAF50', () => {
+        // Button 1 (IA): Green
+        this.createButton(cx, H * 0.43, 'Jogar contra I.A.', 'color_pick_bg', 0x00ee00, () => {
             this.scene.start('ColorPickScene', { mode: 'IA' });
         });
 
-        this.createButton(cx, H * 0.57, 'Multiplayer Online', '#2196F3', () => {
+        // Button 2 (Online): Red
+        this.createButton(cx, H * 0.63, 'Multiplayer Online', 'lobby_bg_cartoon', 0xff3333, () => {
             this.scene.start('LobbyScene');
         });
 
-        this.createButton(cx, H * 0.70, 'Multiplayer Local', '#FF9800', () => {
+        // Button 3 (Local): Yellow
+        this.createButton(cx, H * 0.83, 'Multiplayer Local', 'game_bg', 0xffd700, () => {
             this.scene.start('ColorPickScene', { mode: 'LOCAL' });
         });
     }
 
-    createButton(x, y, text, color, onClick) {
+    createButton(x, y, text, previewKey, themeColor, onClick) {
         const btn = this.add.container(x, y);
+        const w = 420, h = 120;
         
-        // 1. Drop shadow
+        // 1. Shadow (Colored glow)
         const shadow = this.add.graphics();
-        shadow.fillStyle(0x000000, 0.5);
-        shadow.fillRoundedRect(-145, -25, 300, 60, 30); 
+        shadow.fillStyle(themeColor, 0.2);
+        shadow.fillRoundedRect(-w/2 + 5, -h/2 + 8, w, h, 20); 
         
-        // 2. Base colored shape
+        // 2. Black Translucent Background (70%)
         const bg = this.add.graphics();
-        bg.fillStyle(parseInt(color.replace('#', '0x')), 1);
-        bg.fillRoundedRect(-150, -30, 300, 60, 30); // Fully rounded pill
-        // Elegant semi-transparent border
-        bg.lineStyle(2, 0xffffff, 0.3);
-        bg.strokeRoundedRect(-150, -30, 300, 60, 30);
-
-        // 3. Top Sheen overlay (glassmorphism feel)
-        const sheen = this.add.graphics();
-        sheen.fillStyle(0xffffff, 0.15);
-        // Half-height rectangle for the glossy reflection effect on top half
-        sheen.fillRoundedRect(-148, -28, 296, 28, { tl: 28, tr: 28, bl: 0, br: 0 });
-
-        // 4. Hover effect overlay
-        const hoverOverlay = this.add.graphics();
-        hoverOverlay.fillStyle(0xffffff, 0.25);
-        hoverOverlay.fillRoundedRect(-150, -30, 300, 60, 30);
-        hoverOverlay.setAlpha(0); // Invisible by default
+        bg.fillStyle(0x000000, 0.7);
+        bg.fillRoundedRect(-w/2, -h/2, w, h, 20);
         
-        // 5. Text with shadow for max legibility
-        const txt = this.add.text(0, 0, text, {
-            fontSize: '24px',
-            fontFamily: 'Arial',
+        // Themed Border
+        bg.lineStyle(3, themeColor, 0.9);
+        bg.strokeRoundedRect(-w/2, -h/2, w, h, 20);
+
+        // 3. Preview Image (small thumbnail inside)
+        const maskGraphics = this.make.graphics({ x, y, add: false });
+        maskGraphics.fillRoundedRect(-w/2 + 10, -h/2 + 10, 100, 100, 15);
+        const mask = maskGraphics.createGeometryMask();
+
+        const preview = this.add.image(-w/2 + 60, 0, previewKey);
+        const pScale = Math.max(100 / preview.width, 100 / preview.height);
+        preview.setScale(pScale).setMask(mask);
+        
+        // Border for the preview thumbnail in theme color
+        const thumbBorder = this.add.graphics();
+        thumbBorder.lineStyle(3, themeColor, 0.6);
+        thumbBorder.strokeRoundedRect(-w/2 + 10, -h/2 + 10, 100, 100, 15);
+
+        // 4. Hover effect overlay (Colored)
+        const hoverOverlay = this.add.graphics();
+        hoverOverlay.fillStyle(themeColor, 0.15);
+        hoverOverlay.fillRoundedRect(-w/2, -h/2, w, h, 20);
+        hoverOverlay.setAlpha(0);
+        
+        // 5. Text (White with theme shadow)
+        const txt = this.add.text(60, 0, text, {
+            fontSize: '26px',
+            fontFamily: 'Arial Black',
             fill: '#ffffff',
             fontWeight: 'bold',
-            shadow: { offsetX: 1, offsetY: 2, color: '#000000', blur: 3, fill: true, opacity: 0.6 }
+            stroke: '#000000',
+            strokeThickness: 3,
+            shadow: { offsetX: 0, offsetY: 0, color: '#' + themeColor.toString(16).padStart(6, '0'), blur: 10, fill: true }
         }).setOrigin(0.5);
 
-        btn.add([shadow, bg, sheen, hoverOverlay, txt]);
+        btn.add([shadow, bg, preview, thumbBorder, hoverOverlay, txt]);
         
-        const hitArea = new Phaser.Geom.Rectangle(-150, -30, 300, 60);
+        const hitArea = new Phaser.Geom.Rectangle(-w/2, -h/2, w, h);
         btn.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
         
-        btn.on('pointerdown', () => {
-            btn.setScale(0.96);
-        });
-
-        btn.on('pointerup', () => {
-            btn.setScale(1);
-            onClick();
-        });
-
+        btn.on('pointerdown', () => btn.setScale(0.96));
+        btn.on('pointerup', () => { btn.setScale(1); onClick(); });
         btn.on('pointerover', () => {
-            this.tweens.add({ targets: hoverOverlay, alpha: 1, duration: 250, ease: 'Sine.easeOut' });
+            this.tweens.add({ targets: hoverOverlay, alpha: 1, duration: 200 });
+            this.tweens.add({ targets: btn, scale: 1.03, duration: 150, ease: 'Back.easeOut' });
         });
-
         btn.on('pointerout', () => {
             btn.setScale(1);
-            this.tweens.add({ targets: hoverOverlay, alpha: 0, duration: 250, ease: 'Sine.easeOut' });
+            this.tweens.add({ targets: hoverOverlay, alpha: 0, duration: 200 });
         });
     }
 }

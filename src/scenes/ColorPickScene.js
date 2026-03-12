@@ -16,10 +16,11 @@ export class ColorPickScene extends Phaser.Scene {
     init(data) {
         this.mode = data?.mode || 'IA';
         this.selectedColors = [];
-        this.playerCount = (this.mode === 'LOCAL') ? 4 : 1;
+        this.playerCount = 4; // Default to 4
     }
 
     preload() {
+        this.load.image('game_bg', '/game_bg.png');
         this.load.image('color_pick_bg', '/color_pick_bg.png');
     }
 
@@ -30,7 +31,8 @@ export class ColorPickScene extends Phaser.Scene {
         const H = this.cameras.main.height;
 
         // Background
-        const bg = this.add.image(cx, cy, 'color_pick_bg');
+        const bgImg = this.mode === 'IA' ? 'color_pick_bg' : 'game_bg';
+        const bg = this.add.image(cx, cy, bgImg);
         bg.setScale(Math.max(W / bg.width, H / bg.height) || 1);
 
         // Dark overlay
@@ -62,17 +64,20 @@ export class ColorPickScene extends Phaser.Scene {
             fill: '#aaaaaa'
         }).setOrigin(0.5);
 
-        if (this.mode === 'LOCAL') {
+        if (this.mode === 'LOCAL' || this.mode === 'IA') {
             this.createPlayerCountSelector(cx, 180);
         }
 
-        // Color cards — 2x2 grid
-        const gridY = this.mode === 'LOCAL' ? cy + 60 : cy + 20;
+        // Color cards — 2x2 grid with increased spacing
+        const gridY = this.mode === 'LOCAL' ? cy + 80 : cy + 40;
+        const spacingX = 110; // More horizontal gap
+        const spacingY = 110; // Much more vertical gap (padding)
+        
         const positions = [
-            { x: cx - 88, y: gridY - 76 },
-            { x: cx + 88, y: gridY - 76 },
-            { x: cx - 88, y: gridY + 76 },
-            { x: cx + 88, y: gridY + 76 },
+            { x: cx - spacingX, y: gridY - spacingY },
+            { x: cx + spacingX, y: gridY - spacingY },
+            { x: cx - spacingX, y: gridY + spacingY },
+            { x: cx + spacingX, y: gridY + spacingY },
         ];
 
         this.cards = [];
@@ -92,27 +97,32 @@ export class ColorPickScene extends Phaser.Scene {
         this.countButtons = [];
 
         counts.forEach((num, i) => {
-            const btnX = x + (i - 1) * 88;
+            const btnX = x + (i - 1) * 110;
             const container = this.add.container(btnX, y);
             
+            const shadow = this.add.graphics();
+            shadow.fillStyle(0x000000, 0.3);
+            shadow.fillRoundedRect(-46, -22, 92, 44, 12);
+
             const bg = this.add.graphics();
             const txt = this.add.text(0, 0, `${num} Jog.`, {
-                fontSize: '13px',
-                fontFamily: 'Arial',
+                fontSize: '15px',
+                fontFamily: 'Arial Black',
                 fontWeight: 'bold',
                 fill: '#ffffff'
             }).setOrigin(0.5);
 
-            container.add([bg, txt]);
-            container.setInteractive(new Phaser.Geom.Rectangle(-36, -16, 72, 32), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+            container.add([shadow, bg, txt]);
+            container.setInteractive(new Phaser.Geom.Rectangle(-45, -20, 90, 40), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
             
             container.on('pointerdown', () => {
                 this.playerCount = num;
                 this.selectedColors = [];
                 this.refreshUI();
+                this.tweens.add({ targets: container, scale: 0.9, duration: 100, yoyo: true });
             });
 
-            this.countButtons.push({ bg, num });
+            this.countButtons.push({ bg, num, txt });
         });
     }
 
@@ -168,10 +178,12 @@ export class ColorPickScene extends Phaser.Scene {
         if (this.countButtons) {
             this.countButtons.forEach(btn => {
                 btn.bg.clear();
-                btn.bg.fillStyle(btn.num === this.playerCount ? 0x2196F3 : 0x333333, 1);
-                btn.bg.fillRoundedRect(-36, -16, 72, 32, 8);
-                btn.bg.lineStyle(2, 0xffffff, btn.num === this.playerCount ? 1 : 0.3);
-                btn.bg.strokeRoundedRect(-36, -16, 72, 32, 8);
+                const isActive = btn.num === this.playerCount;
+                btn.bg.fillStyle(isActive ? 0x000000 : 0x000000, 0.7);
+                btn.bg.fillRoundedRect(-45, -20, 90, 40, 12);
+                btn.bg.lineStyle(2, isActive ? 0x2196F3 : 0xffffff, isActive ? 1 : 0.2);
+                btn.bg.strokeRoundedRect(-45, -20, 90, 40, 12);
+                btn.txt.setAlpha(isActive ? 1 : 0.5);
             });
         }
 
@@ -190,42 +202,53 @@ export class ColorPickScene extends Phaser.Scene {
 
     createColorCard(x, y, cd) {
         const container = this.add.container(x, y);
-        const w = 128, h = 144;
+        const w = 160, h = 180; // Larger cards
 
         const shadow = this.add.graphics();
-        shadow.fillStyle(0x000000, 0.4);
-        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 5, w, h, 18);
+        shadow.fillStyle(0x000000, 0.5);
+        shadow.fillRoundedRect(-w/2 + 6, -h/2 + 8, w, h, 24);
 
         const card = this.add.graphics();
-        card.fillStyle(0x1a1a2e, 0.5); // 50% transparency for local and IA modes
-        card.fillRoundedRect(-w/2, -h/2, w, h, 18);
-        card.fillStyle(cd.hex, 0.9);
-        card.fillRoundedRect(-w/2, -h/2, w, 11, { tl: 18, tr: 18 });
-        card.lineStyle(2.5, cd.hex, 1);
-        card.strokeRoundedRect(-w/2, -h/2, w, h, 18);
+        card.fillStyle(0x000000, 0.7); // Black translucent
+        card.fillRoundedRect(-w/2, -h/2, w, h, 24);
+        
+        // Border with glow feel
+        card.lineStyle(3, cd.hex, 0.8);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 24);
 
         const pawn = this.drawPawn(cd.hex, cd.darkHex);
-        pawn.setScale(0.85);
+        pawn.setScale(1); // Back to full scale
+        pawn.y = -10;
 
-        const label = this.add.text(0, h/2 - 28, cd.label.toUpperCase(), {
-            fontSize: '13px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
+        const label = this.add.text(0, h/2 - 40, cd.label.toUpperCase(), {
+            fontSize: '16px', fontFamily: 'Arial Black', fill: '#ffffff'
         }).setOrigin(0.5);
 
         const rankText = this.add.text(0, -h/2 + 25, '', {
-            fontSize: '11px', fontFamily: 'Arial Black, Arial', fill: '#4CAF50', fontWeight: 'bold'
+            fontSize: '12px', fontFamily: 'Arial Black', fill: cd.hex
         }).setOrigin(0.5).setVisible(false);
 
-        const btnLabel = this.add.text(0, h/2 - 9, '', {
-            fontSize: '9px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff'
-        }).setOrigin(0.5);
+        const btnLabel = this.add.text(0, h/2 - 15, '', {
+            fontSize: '10px', fontFamily: 'Arial Black', fill: '#ffffff'
+        }).setOrigin(0.5).setAlpha(0.7);
 
         const hoverOverlay = this.add.graphics();
-        hoverOverlay.fillStyle(0xffffff, 0.08);
-        hoverOverlay.fillRoundedRect(-w/2, -h/2, w, h, 22);
+        hoverOverlay.fillStyle(cd.hex, 0.12);
+        hoverOverlay.fillRoundedRect(-w/2, -h/2, w, h, 24);
         hoverOverlay.setAlpha(0);
 
         container.add([shadow, card, pawn, label, rankText, btnLabel, hoverOverlay]);
         container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerover', () => {
+            this.tweens.add({ targets: hoverOverlay, alpha: 1, duration: 150 });
+            this.tweens.add({ targets: container, scale: 1.05, duration: 100 });
+        });
+
+        container.on('pointerout', () => {
+            this.tweens.add({ targets: hoverOverlay, alpha: 0, duration: 150 });
+            this.tweens.add({ targets: container, scale: 1, duration: 100 });
+        });
 
         container.on('pointerdown', () => {
             if (this.mode === 'IA') {
@@ -245,14 +268,16 @@ export class ColorPickScene extends Phaser.Scene {
     }
 
     startGame(activeColors) {
-        // Clone the array to avoid reference issues
         const players = [...activeColors];
-        
-        // If IA mode, we only picked 1 color, but logic needs knowledge of all participants
-        // In IA mode, the GameScene will handle assigning aiPlayers to everything except the first entry
         let finalActivePlayers = players;
+
         if (this.mode === 'IA') {
-            finalActivePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+             // In IA mode, we start with the chosen color and fill the rest with AI up to playerCount
+             const allColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+             const myColor = players[0];
+             
+             // Move myColor to front
+             finalActivePlayers = [myColor, ...allColors.filter(c => c !== myColor)].slice(0, this.playerCount);
         }
 
         this.scene.start('GameScene', {

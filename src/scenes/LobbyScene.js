@@ -7,7 +7,7 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     preload() {
-        this.load.image('lobby_bg', '/lobby_bg.png');
+        this.load.image('lobby_bg', '/lobby_bg_cartoon.png');
     }
 
     async create() {
@@ -35,21 +35,54 @@ export class LobbyScene extends Phaser.Scene {
         .on('pointerdown', () => this.leaveAndBack());
 
         // Title
-        this.titleText = this.add.text(cx, 80, 'Multiplayer Online', {
-            fontSize: '40px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff',
-            shadow: { offsetX: 2, offsetY: 3, color: '#000', blur: 8, fill: true }
+        this.titleText = this.add.text(cx, 100, 'Ludo Online', {
+            fontSize: '48px', fontFamily: 'Arial Black, Arial', fontWeight: 'bold', fill: '#ffffff',
+            shadow: { offsetX: 3, offsetY: 4, color: '#000', blur: 10, fill: true }
         }).setOrigin(0.5);
 
-        this.instructionText = this.add.text(cx, 135, 'Buscando salas disponíveis...', {
-            fontSize: '18px', fontFamily: 'Arial', fill: '#aaaaaa'
+        this.instructionText = this.add.text(cx, 160, 'Selecione o modo de jogo', {
+            fontSize: '20px', fontFamily: 'Arial', fill: '#cccccc'
         }).setOrigin(0.5);
+
+        this.onlineCountText = this.add.text(W - 30, 30, 'Online: ...', {
+            fontSize: '17px', fontFamily: 'Arial Black', fill: '#4CAF50',
+            backgroundColor: '#000000', padding: { x: 10, y: 6 }
+        }).setOrigin(1, 0).setAlpha(0.9).setDepth(10);
+
+        // --- SCROLLABLE LIST SETUP ---
+        this.listY = 200;
+        this.listHeight = H - this.listY - 20;
+        
+        // Mask for the scrollable area - Using make.graphics with add:false so it's not visible
+        const maskShape = this.make.graphics({ add: false });
+        maskShape.fillStyle(0xffffff);
+        maskShape.fillRect(0, this.listY, W, this.listHeight);
+        const listMask = maskShape.createGeometryMask();
 
         this.roomsContainer = this.add.container(0, 0);
+        this.roomsContainer.setMask(listMask);
+
+        // Interaction for scrolling
+        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+            if (this.joinedRoom) return;
+            this.scrollList(-deltaY * 0.5);
+        });
+
+        let dragY = 0;
+        this.input.on('pointerdown', (p) => dragY = p.y);
+        this.input.on('pointermove', (p) => {
+            if (p.isDown && !this.joinedRoom) {
+                const diff = p.y - dragY;
+                dragY = p.y;
+                this.scrollList(diff);
+            }
+        });
 
         // Waiting Overlay (hidden by default)
         this.createWaitingOverlay(cx, cy, W, H);
 
         // Initial Data Fetch
+        await this.cleanupStalePlayers();
         await this.refreshRooms();
 
         // Subscribe to room updates (Realtime)
@@ -96,59 +129,313 @@ export class LobbyScene extends Phaser.Scene {
 
         this.waitingOverlay.add([bg, card, this.waitingTitle, this.waitingStatus, cancelBtn]);
     }
+    
+    scrollList(amount) {
+        const minHeight = this.listHeight;
+        const contentHeight = Math.max(minHeight, this.maxScrollY || 0);
+        
+        this.roomsContainer.y += amount;
+        
+        // Bounds
+        const limit = -(contentHeight - minHeight + 100);
+        if (this.roomsContainer.y > 0) this.roomsContainer.y = 0;
+        if (this.roomsContainer.y < limit) this.roomsContainer.y = limit;
+    }
 
     async refreshRooms() {
-        if (this.joinedRoom) return; // Don't refresh grid if already in a room waiting
+        if (this.joinedRoom) return;
 
-        const { data: rooms, error } = await supabase
+        await this.cleanupStalePlayers();
+
+        const { count: totalPlayers } = await supabase
+            .from('ludo_players')
+            .select('*', { count: 'exact', head: true });
+
+        this.onlineCountText.setText(`Online: ${totalPlayers || 0}`);
+        this.roomsContainer.removeAll(true);
+        this.roomsContainer.y = 0;
+
+        const cx = this.cameras.main.centerX;
+        const W = this.cameras.main.width;
+        
+        // On mobile and desktop, we now use a consistent LIST layout for "infinite" scroll feel
+        let currentY = this.listY + 50; 
+
+        // --- MATCHMAKING SECTION (Always top list items) ---
+        this.createMatchmakingCardList(cx, currentY, 2);
+        currentY += 100;
+        this.createMatchmakingCardList(cx, currentY, 4);
+        currentY += 120;
+
+        // --- PUBLIC ROOMS SECTION ---
+        const { data: rooms } = await supabase
             .from('ludo_rooms')
             .select(`*, ludo_players (id)`)
             .order('id', { ascending: true });
 
-        if (error) return;
+        if (rooms) {
+            const sectionTitle = this.add.text(cx, currentY, 'Salas Públicas', {
+                fontSize: '18px', fontFamily: 'Arial Black', fill: '#888'
+            }).setOrigin(0.5).setAlpha(0.6);
+            this.roomsContainer.add(sectionTitle);
+            
+            currentY += 60;
 
-        this.instructionText.setText('Escolha uma sala para entrar');
-        this.roomsContainer.removeAll(true);
-
-        const cx = this.cameras.main.centerX;
-        const cy = this.cameras.main.centerY;
-        const W = this.cameras.main.width;
-        const H = this.cameras.main.height;
-
-        const isMobile = W < H || W < 600;
-
-        if (isMobile) {
-            // List Layout (Mobile)
-            const listStartY = cy - 120;
-            const itemSpacingY = 110;
-
-            rooms.forEach((room, i) => {
+            rooms.forEach((room) => {
                 const playerCount = room.ludo_players?.length || 0;
                 const status = playerCount >= room.max_players ? 'CHEIA' : room.status || 'LIVRE';
-                const card = this.createRoomCardList(cx, listStartY + (i * itemSpacingY), { ...room, playerCount, status });
-                this.roomsContainer.add(card);
-            });
-        } else {
-            // Grid Layout (PC/Landscape)
-            const gridY = cy + 40;
-            const spacingX = 220;
-            const spacingY = 220;
-
-            const positions = [
-                { x: cx - spacingX/2, y: gridY - spacingY/2 },
-                { x: cx + spacingX/2, y: gridY - spacingY/2 },
-                { x: cx - spacingX/2, y: gridY + spacingY/2 },
-                { x: cx + spacingX/2, y: gridY + spacingY/2 }
-            ];
-
-            rooms.forEach((room, i) => {
-                if (i >= positions.length) return;
-                const playerCount = room.ludo_players?.length || 0;
-                const status = playerCount >= room.max_players ? 'CHEIA' : room.status || 'LIVRE';
-                const card = this.createRoomCard(positions[i].x, positions[i].y, { ...room, playerCount, status });
-                this.roomsContainer.add(card);
+                this.createRoomCardList(cx, currentY, { ...room, playerCount, status });
+                currentY += 100;
             });
         }
+        
+        this.maxScrollY = currentY;
+    }
+
+    createMatchmakingCardList(x, y, size) {
+        const container = this.add.container(x, y);
+        this.roomsContainer.add(container);
+        const w = 400, h = 80;
+
+        const shadow = this.add.graphics();
+        shadow.fillStyle(0x000000, 0.4);
+        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 4, w, h, 15);
+
+        const card = this.add.graphics();
+        const color = size === 2 ? 0x2196F3 : 0x9C27B0;
+        
+        card.fillStyle(0x1a1a2e, 0.85);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 15);
+        card.lineStyle(3, color, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
+
+        const title = this.add.text(-w/2 + 20, 0, `ALEATÓRIO (${size} JOG.)`, {
+            fontSize: '18px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0, 0.5);
+
+        const icon = this.add.text(w/2 - 40, 0, '⚡', { fontSize: '24px' }).setOrigin(0.5);
+
+        container.add([shadow, card, title, icon]);
+        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerover', () => {
+            this.tweens.add({ targets: container, scale: 1.02, duration: 100 });
+            card.lineStyle(4, 0xffffff, 1);
+            card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
+        });
+
+        container.on('pointerout', () => {
+            this.tweens.add({ targets: container, scale: 1, duration: 100 });
+            card.lineStyle(3, color, 1);
+            card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
+        });
+
+        container.on('pointerdown', () => this.handleMatchmaking(size));
+    }
+
+    createMatchmakingCard(x, y, size) {
+        const container = this.add.container(x, y);
+        this.roomsContainer.add(container); // Add to main container
+        const w = 240, h = 120;
+
+        const shadow = this.add.graphics();
+        shadow.fillStyle(0x000000, 0.4);
+        shadow.fillRoundedRect(-w/2 + 5, -h/2 + 7, w, h, 20);
+
+        const card = this.add.graphics();
+        const color = size === 2 ? 0x2196F3 : 0x9C27B0; // Blue for 2, Purple for 4
+        
+        card.fillStyle(0x1a1a2e, 0.8);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 20);
+        card.lineStyle(3, color, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 20);
+
+        const title = this.add.text(0, -25, 'ALEATÓRIO', {
+            fontSize: '14px', fontFamily: 'Arial Black', fill: '#aaa'
+        }).setOrigin(0.5);
+
+        const mainText = this.add.text(0, 10, `${size} JOGADORES`, {
+            fontSize: '22px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0.5);
+
+        container.add([shadow, card, title, mainText]);
+        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerover', () => {
+            this.tweens.add({ targets: container, scale: 1.05, duration: 100 });
+            card.lineStyle(4, 0xffffff, 1);
+            card.strokeRoundedRect(-w/2, -h/2, w, h, 20);
+        });
+
+        container.on('pointerout', () => {
+            this.tweens.add({ targets: container, scale: 1, duration: 100 });
+            card.lineStyle(3, color, 1);
+            card.strokeRoundedRect(-w/2, -h/2, w, h, 20);
+        });
+
+        container.on('pointerdown', () => {
+            this.handleMatchmaking(size);
+        });
+
+        this.roomsContainer.add(container);
+    }
+
+    async handleMatchmaking(size) {
+        this.instructionText.setText('Procurando partida...');
+        
+        // 1. Get all rooms status
+        const { data: rooms } = await supabase
+            .from('ludo_rooms')
+            .select('*, ludo_players (id)')
+            .eq('status', 'LIVRE')
+            .eq('max_players', size);
+        
+        // 2. Find a room that has players but is not full
+        let roomToJoin = rooms?.sort((a, b) => (b.ludo_players?.length || 0) - (a.ludo_players?.length || 0))
+                             .find(r => (r.ludo_players?.length || 0) < size);
+
+        // 3. If no partially full room, find any empty room
+        if (!roomToJoin) {
+            const { data: allRooms } = await supabase
+                .from('ludo_rooms')
+                .select('*, ludo_players (id)');
+            
+            roomToJoin = allRooms?.find(r => (r.ludo_players?.length || 0) === 0);
+            
+            if (roomToJoin) {
+                // Configure it for the requested size
+                await supabase.from('ludo_rooms').update({ max_players: size, status: 'LIVRE' }).eq('id', roomToJoin.id);
+                roomToJoin.max_players = size;
+            }
+        }
+
+        if (roomToJoin) {
+            this.initiateJoin(roomToJoin);
+        } else {
+            alert('Nenhuma sala disponível no momento. Tente novamente em alguns segundos.');
+            this.refreshRooms();
+        }
+    }
+
+    async initiateJoin(room) {
+        const { data: existingPlayers } = await supabase
+            .from('ludo_players')
+            .select('color')
+            .eq('room_id', room.id);
+        
+        const takenColors = existingPlayers?.map(p => p.color) || [];
+        
+        // Restore custom room color rules
+        let availableColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        if (room.id == 1) availableColors = ['RED', 'YELLOW'];
+        else if (room.id == 2) availableColors = ['BLUE', 'GREEN'];
+        else availableColors = availableColors.slice(0, room.max_players);
+
+        this.myColor = availableColors.find(c => !takenColors.includes(c));
+
+        if (!this.myColor) {
+            if (this.instructionText.text.includes('Procurando')) {
+                 this.handleMatchmaking(room.max_players);
+            } else {
+                 alert('A sala está cheia!');
+            }
+            return;
+        }
+
+        const { error } = await supabase.from('ludo_players').insert({
+            room_id: room.id,
+            color: this.myColor,
+            last_active: new Date()
+        });
+
+        if (error) {
+            this.refreshRooms();
+            return;
+        }
+
+        this.joinedRoom = room;
+        this.waitingOverlay.setVisible(true);
+        this.roomsContainer.setVisible(false);
+        this.onPlayerUpdate();
+    }
+
+    createRoomCard(x, y, room) {
+        const container = this.add.container(x, y);
+        const w = 200, h = 160;
+
+        const shadow = this.add.graphics();
+        shadow.fillStyle(0x000000, 0.4);
+        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 6, w, h, 20);
+
+        const card = this.add.graphics();
+        card.fillStyle(0x1a1a2e, 0.5);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 20);
+
+        const color = room.status === 'EM JOGO' ? 0xFF9800 : room.status === 'CHEIA' ? 0xF44336 : 0x4CAF50;
+        card.lineStyle(2, color, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 20);
+
+        const name = this.add.text(0, -30, room.name, {
+            fontSize: '15px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0.5);
+
+        const playersIcon = this.add.text(0, 15, `${room.playerCount}/${room.max_players}`, {
+            fontSize: '32px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0.5);
+
+        const badgeText = this.add.text(0, 50, room.status, {
+            fontSize: '10px', fontFamily: 'Arial Black', fill: color
+        }).setOrigin(0.5);
+
+        container.add([shadow, card, name, playersIcon, badgeText]);
+        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerdown', () => {
+            if (room.status === 'CHEIA' || room.status === 'EM JOGO') return;
+            this.initiateJoin(room);
+        });
+
+        return container;
+    }
+
+    createRoomCardList(x, y, room) {
+        const container = this.add.container(x, y);
+        this.roomsContainer.add(container);
+        const w = 400, h = 80;
+
+        const shadow = this.add.graphics();
+        shadow.fillStyle(0x000000, 0.4);
+        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 4, w, h, 15);
+
+        const card = this.add.graphics();
+        card.fillStyle(0x1a1a2e, 0.7);
+        card.fillRoundedRect(-w/2, -h/2, w, h, 15);
+
+        const color = room.status === 'EM JOGO' ? 0xFF9800 : room.status === 'CHEIA' ? 0xF44336 : 0x4CAF50;
+        card.lineStyle(2, color, 1);
+        card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
+
+        const name = this.add.text(-w/2 + 20, 0, room.name, {
+            fontSize: '16px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0, 0.5);
+
+        const playerCount = this.add.text(w/2 - 80, 0, `${room.playerCount}/${room.max_players}`, {
+            fontSize: '20px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0.5);
+
+        const badgeText = this.add.text(w/2 - 35, 0, room.status, {
+            fontSize: '10px', fontFamily: 'Arial Black', fill: color
+        }).setOrigin(0.5).setAngle(90);
+
+        container.add([shadow, card, name, playerCount, badgeText]);
+        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+
+        container.on('pointerdown', () => {
+             if (room.status === 'CHEIA' || room.status === 'EM JOGO') return;
+            this.initiateJoin(room);
+        });
+
+        return container;
     }
 
     async onPlayerUpdate() {
@@ -180,129 +467,7 @@ export class LobbyScene extends Phaser.Scene {
         }
     }
 
-    createRoomCard(x, y, room) {
-        const container = this.add.container(x, y);
-        const w = 200, h = 200;
 
-        const shadow = this.add.graphics();
-        shadow.fillStyle(0x000000, 0.4);
-        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 6, w, h, 20);
-
-        // Card bg
-        const card = this.add.graphics();
-        card.fillStyle(0x1a1a2e, 0.5);
-        card.fillRoundedRect(-w/2, -h/2, w, h, 20);
-
-        const color = room.status === 'EM JOGO' ? 0xFF9800 : room.status === 'CHEIA' ? 0xF44336 : 0x4CAF50;
-        card.lineStyle(3, color, 1);
-        card.strokeRoundedRect(-w/2, -h/2, w, h, 20);
-
-        const title = this.add.text(0, -70, `SALA 0${room.id}`, {
-            fontSize: '14px', fontFamily: 'Arial Black', fill: '#888'
-        }).setOrigin(0.5);
-
-        const name = this.add.text(0, -35, room.name, {
-            fontSize: '16px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0.5);
-
-        const playersIcon = this.add.text(0, 10, `${room.playerCount}/${room.max_players}`, {
-            fontSize: '38px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0.5);
-
-        const badgeText = this.add.text(0, 61, room.status, {
-            fontSize: '10px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0.5);
-
-        container.add([shadow, card, title, name, playersIcon, badgeText]);
-        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
-
-        container.on('pointerdown', () => {
-            if (room.status === 'CHEIA') return;
-            this.joinRoom(room);
-        });
-
-        return container;
-    }
-
-    createRoomCardList(x, y, room) {
-        const container = this.add.container(x, y);
-        const w = 340, h = 90;
-
-        const shadow = this.add.graphics();
-        shadow.fillStyle(0x000000, 0.4);
-        shadow.fillRoundedRect(-w/2 + 4, -h/2 + 4, w, h, 15);
-
-        const card = this.add.graphics();
-        card.fillStyle(0x1a1a2e, 0.5);
-        card.fillRoundedRect(-w/2, -h/2, w, h, 15);
-
-        const color = room.status === 'EM JOGO' ? 0xFF9800 : room.status === 'CHEIA' ? 0xF44336 : 0x4CAF50;
-        card.lineStyle(2, color, 1);
-        card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
-
-        const name = this.add.text(-w/2 + 20, 0, room.name, {
-            fontSize: '18px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0, 0.5);
-
-        const playerCount = this.add.text(w/2 - 80, 0, `${room.playerCount}/${room.max_players}`, {
-            fontSize: '24px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0.5);
-
-        const badgeText = this.add.text(w/2 - 35, 0, room.status, {
-            fontSize: '10px', fontFamily: 'Arial Black', fill: color
-        }).setOrigin(0.5).setAngle(90);
-
-        container.add([shadow, card, name, playerCount, badgeText]);
-        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
-
-        container.on('pointerdown', () => {
-            if (room.status === 'CHEIA') return;
-            this.joinRoom(room);
-        });
-
-        return container;
-    }
-
-    async joinRoom(room) {
-        const { data: existingPlayers } = await supabase
-            .from('ludo_players')
-            .select('color')
-            .eq('room_id', room.id);
-        
-        const takenColors = existingPlayers?.map(p => p.color) || [];
-        
-        // Custom Rule: 2-player room color pairs
-        let availableColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
-        if (room.id === 1) {
-            availableColors = ['RED', 'YELLOW'];
-        } else if (room.id === 2) {
-            availableColors = ['BLUE', 'GREEN'];
-        }
-
-        this.myColor = availableColors.find(c => !takenColors.includes(c));
-
-        if (!this.myColor) {
-            alert('A sala está cheia!');
-            return;
-        }
-
-        // Join
-        const { error } = await supabase.from('ludo_players').insert({
-            room_id: room.id,
-            color: this.myColor,
-            last_active: new Date()
-        });
-
-        if (error) {
-            console.error(error);
-            return;
-        }
-
-        this.joinedRoom = room;
-        this.waitingOverlay.setVisible(true);
-        this.roomsContainer.setVisible(false);
-        this.onPlayerUpdate();
-    }
 
     async leaveRoom() {
         if (this.joinedRoom && this.myColor) {
@@ -315,7 +480,30 @@ export class LobbyScene extends Phaser.Scene {
         this.myColor = null;
         this.waitingOverlay.setVisible(false);
         this.roomsContainer.setVisible(true);
-        this.refreshRooms();
+        await this.cleanupStalePlayers();
+        await this.refreshRooms();
+    }
+
+    async cleanupStalePlayers() {
+        // 1. Delete inactive players
+        const fortySecondsAgo = new Date(Date.now() - 40000).toISOString();
+        const { error } = await supabase
+            .from('ludo_players')
+            .delete()
+            .lt('last_active', fortySecondsAgo);
+        
+        if (error) console.warn('Cleanup error:', error);
+
+        // 2. Check rooms that are "EM JOGO" but have no players (orphaned)
+        const { data: rooms } = await supabase.from('ludo_rooms').select('id, status, ludo_players(id)');
+        if (rooms) {
+            for (const r of rooms) {
+                const count = r.ludo_players?.length || 0;
+                if (count === 0 && (r.status === 'EM JOGO' || r.status === 'CHEIA')) {
+                    await supabase.from('ludo_rooms').update({ status: 'LIVRE' }).eq('id', r.id);
+                }
+            }
+        }
     }
 
     leaveAndBack() {
@@ -323,8 +511,11 @@ export class LobbyScene extends Phaser.Scene {
         this.scene.start('MenuScene');
     }
 
-    startGame(activePlayers) {
+    async startGame(activePlayers) {
         if (!this.joinedRoom) return;
+
+        // Set room status to EM JOGO so new matchmakers don't join
+        await supabase.from('ludo_rooms').update({ status: 'EM JOGO' }).eq('id', this.joinedRoom.id);
 
         this.cameras.main.fadeOut(300, 0, 0, 0);
         this.cameras.main.once('camerafadeoutcomplete', () => {
