@@ -182,7 +182,7 @@ export class LobbyScene extends Phaser.Scene {
 
     createRoomCard(x, y, room) {
         const container = this.add.container(x, y);
-        const w = 200, h = 200;
+        const w = 160, h = 160;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
@@ -226,7 +226,7 @@ export class LobbyScene extends Phaser.Scene {
 
     createRoomCardList(x, y, room) {
         const container = this.add.container(x, y);
-        const w = 340, h = 90;
+        const w = 272, h = 72;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
@@ -332,7 +332,8 @@ export class LobbyScene extends Phaser.Scene {
                 mode: 'ONLINE',
                 roomId: this.joinedRoom.id,
                 playerColor: this.myColor,
-                activePlayers: activePlayers
+                activePlayers: activePlayers,
+                isNewMatch: true
             });
         });
     }

@@ -8,7 +8,7 @@ export class LudoOnline {
         this.subscription = null;
     }
 
-    async joinRoom(color) {
+    async joinRoom(color, activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'], forceReset = false) {
         // 1. Update player in ludo_players (already inserted by LobbyScene)
         const { error } = await supabase
             .from('ludo_players')
@@ -38,26 +38,45 @@ export class LudoOnline {
             .single();
         
         if (stateData) {
-            this.onStateUpdate(stateData);
+            // Validate if state is fresh or if we specifically requested a reset
+            // Initialization is forced if:
+            // - forceReset is true (new match from lobby)
+            // - OR current_turn is invalid for this room (stale state)
+            if (forceReset || !activePlayers.includes(stateData.current_turn)) {
+                console.log('Resetting/Re-initializing game state...');
+                await this.initializeGameState(activePlayers[0]);
+            } else {
+                // If it's a join but not my turn, just let the Realtime update handle it or call update directly
+                this.onStateUpdate(stateData);
+            }
         } else {
             // If it doesn't exist, initialize it
-            await this.initializeGameState();
+            await this.initializeGameState(activePlayers[0]);
         }
     }
 
-    async initializeGameState() {
-        await supabase.from('ludo_game_state').upsert({
+    async initializeGameState(firstTurn) {
+        // Fetch current to avoid race conditions if needed, but upsert is fine here
+        const initialState = {
             room_id: this.roomId,
-            current_turn: 'RED',
+            current_turn: firstTurn || 'RED',
             last_dice_roll: 0,
-            pieces: { RED: [0, 0, 0, 0], BLUE: [0, 0, 0, 0], YELLOW: [0, 0, 0, 0], GREEN: [0, 0, 0, 0] }
-        });
+            pieces: { RED: [0, 0, 0, 0], BLUE: [0, 0, 0, 0], YELLOW: [0, 0, 0, 0], GREEN: [0, 0, 0, 0] },
+            updated_at: new Date()
+        };
+        await supabase.from('ludo_game_state').upsert(initialState);
+        this.onStateUpdate(initialState); // Trigger local sync immediately
     }
 
     async updateGame(turn, roll, pieces) {
         await supabase
             .from('ludo_game_state')
-            .update({ current_turn: turn, last_dice_roll: roll, pieces, updated_at: new Date() })
+            .update({ 
+                current_turn: turn, 
+                last_dice_roll: roll, 
+                pieces, 
+                updated_at: new Date() 
+            })
             .eq('room_id', this.roomId);
     }
 

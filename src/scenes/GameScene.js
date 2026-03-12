@@ -14,6 +14,7 @@ export class GameScene extends Phaser.Scene {
         this.mode = data?.mode || 'IA';
         this.playerColor = data?.playerColor || 'RED';
         this.activePlayers = data?.activePlayers;
+        this.isNewMatch = data?.isNewMatch || false;
         this.roomId = data?.roomId;
         this.joinedRoom = this.roomId ? { id: this.roomId } : null;
         this.myColor = data?.playerColor;
@@ -99,7 +100,7 @@ export class GameScene extends Phaser.Scene {
 
         if (this.mode === 'ONLINE' && this.roomId) {
             this.online = new LudoOnline(this.roomId, (state) => this.onOnlineUpdate(state));
-            this.online.joinRoom(this.playerColor);
+            this.online.joinRoom(this.playerColor, this.activePlayers, this.isNewMatch);
             
             this._unloadGame = () => {
                 this.online.leaveRoom(this.playerColor);
@@ -205,9 +206,7 @@ export class GameScene extends Phaser.Scene {
             if (isDiferentTurn) {
                 this.logic.turn = state.current_turn;
                 this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
-                this.logic.diceRoll = state.last_dice_roll;
                 this.logic.gameState = 'WAITING_FOR_ROLL';
-                this.resetDice();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
                 this.startTurnTimer();
