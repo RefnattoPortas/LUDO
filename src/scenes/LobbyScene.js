@@ -195,7 +195,7 @@ export class LobbyScene extends Phaser.Scene {
     createMatchmakingCardList(x, y, size) {
         const container = this.add.container(x, y);
         this.roomsContainer.add(container);
-        const w = 400, h = 80;
+        const w = 360, h = 80;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
@@ -236,7 +236,7 @@ export class LobbyScene extends Phaser.Scene {
     createMatchmakingCard(x, y, size) {
         const container = this.add.container(x, y);
         this.roomsContainer.add(container); // Add to main container
-        const w = 240, h = 120;
+        const w = 216, h = 120;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
@@ -372,7 +372,7 @@ export class LobbyScene extends Phaser.Scene {
 
     createRoomCard(x, y, room) {
         const container = this.add.container(x, y);
-        const w = 200, h = 160;
+        const w = 180, h = 160;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);
@@ -412,7 +412,7 @@ export class LobbyScene extends Phaser.Scene {
     createRoomCardList(x, y, room) {
         const container = this.add.container(x, y);
         this.roomsContainer.add(container);
-        const w = 400, h = 80;
+        const w = 360, h = 80;
 
         const shadow = this.add.graphics();
         shadow.fillStyle(0x000000, 0.4);

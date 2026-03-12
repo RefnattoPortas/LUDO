@@ -60,7 +60,7 @@ export class MenuScene extends Phaser.Scene {
 
     createButton(x, y, text, previewKey, themeColor, onClick) {
         const btn = this.add.container(x, y);
-        const w = 420, h = 120;
+        const w = 378, h = 120;
         
         // 1. Shadow (Colored glow)
         const shadow = this.add.graphics();
