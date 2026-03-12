@@ -283,7 +283,7 @@ export class LobbyScene extends Phaser.Scene {
     async handleMatchmaking(size) {
         this.instructionText.setText('Procurando partida...');
         
-        // 1. Get all rooms status
+        // 1. Get all compatible rooms
         const { data: rooms } = await supabase
             .from('ludo_rooms')
             .select('*, ludo_players (id)')
@@ -291,28 +291,39 @@ export class LobbyScene extends Phaser.Scene {
             .eq('max_players', size);
         
         // 2. Find a room that has players but is not full
+        // Sort DESC by player count to group people together in partially filled rooms
         let roomToJoin = rooms?.sort((a, b) => (b.ludo_players?.length || 0) - (a.ludo_players?.length || 0))
                              .find(r => (r.ludo_players?.length || 0) < size);
 
-        // 3. If no partially full room, find any empty room
+        // 3. Fallback: Find an empty room
         if (!roomToJoin) {
-            const { data: allRooms } = await supabase
+            const { data: emptyRooms } = await supabase
                 .from('ludo_rooms')
-                .select('*, ludo_players (id)');
+                .select('*, ludo_players (id)')
+                .eq('status', 'LIVRE');
             
-            roomToJoin = allRooms?.find(r => (r.ludo_players?.length || 0) === 0);
+            roomToJoin = emptyRooms?.find(r => (r.ludo_players?.length || 0) === 0);
+        }
+
+        // 4. Fallback 2: Create a new room automatically
+        if (!roomToJoin) {
+            const { data: newRoom, error } = await supabase
+                .from('ludo_rooms')
+                .insert({
+                    name: `Aleatorio (${size} JOG.)`,
+                    max_players: size,
+                    status: 'LIVRE'
+                })
+                .select()
+                .single();
             
-            if (roomToJoin) {
-                // Configure it for the requested size
-                await supabase.from('ludo_rooms').update({ max_players: size, status: 'LIVRE' }).eq('id', roomToJoin.id);
-                roomToJoin.max_players = size;
-            }
+            if (!error) roomToJoin = newRoom;
         }
 
         if (roomToJoin) {
             this.initiateJoin(roomToJoin);
         } else {
-            alert('Nenhuma sala disponível no momento. Tente novamente em alguns segundos.');
+            alert('Não foi possível entrar em uma sala. Tente novamente.');
             this.refreshRooms();
         }
     }
@@ -486,20 +497,25 @@ export class LobbyScene extends Phaser.Scene {
 
     async cleanupStalePlayers() {
         // 1. Delete inactive players
-        const fortySecondsAgo = new Date(Date.now() - 40000).toISOString();
+        const twentyFiveSecondsAgo = new Date(Date.now() - 25000).toISOString();
         const { error } = await supabase
             .from('ludo_players')
             .delete()
-            .lt('last_active', fortySecondsAgo);
+            .lt('last_active', twentyFiveSecondsAgo);
         
         if (error) console.warn('Cleanup error:', error);
 
-        // 2. Check rooms that are "EM JOGO" but have no players (orphaned)
-        const { data: rooms } = await supabase.from('ludo_rooms').select('id, status, ludo_players(id)');
+        // 2. Check rooms that are "EM JOGO" or "CHEIA" but have too few players (abandoned)
+        const { data: rooms } = await supabase.from('ludo_rooms').select('id, status, max_players, ludo_players(id)');
         if (rooms) {
             for (const r of rooms) {
                 const count = r.ludo_players?.length || 0;
-                if (count === 0 && (r.status === 'EM JOGO' || r.status === 'CHEIA')) {
+                // If the game has less than 2 players, it's basically dead/orphaned
+                if (count < 2 && (r.status === 'EM JOGO' || r.status === 'CHEIA')) {
+                    await supabase.from('ludo_rooms').update({ status: 'LIVRE' }).eq('id', r.id);
+                } 
+                // Also ensures that if a room is 0 and LIVRE but has wrong max_players, it can be reused later.
+                else if (count === 0 && r.status === 'CHEIA') {
                     await supabase.from('ludo_rooms').update({ status: 'LIVRE' }).eq('id', r.id);
                 }
             }

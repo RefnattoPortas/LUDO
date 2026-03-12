@@ -155,9 +155,20 @@ export class GameScene extends Phaser.Scene {
     forceNonRespondingTimeout() {
         // Double check turn hasn't changed
         if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) {
-            console.warn('Forcing remote timeout for:', this.logic.turn);
-            this.showTemporaryMessage(this.logic.turn, 'Jogador\nAusente...');
-            this.triggerAutoMove();
+            // To avoid race conditions where multiple players roll for the timed-out player,
+            // only the player whose color comes first in the sorted list of active players
+            // (excluding the one who is currently timeout-ing) should perform the auto-move.
+            
+            const others = this.activePlayers.filter(p => p !== this.logic.turn);
+            const enforcer = others.sort()[0];
+            
+            if (this.playerColor === enforcer) {
+                console.warn('I am the enforcer. Triggering remote timeout for:', this.logic.turn);
+                this.showTemporaryMessage(this.logic.turn, 'Jogador\nAusente...');
+                this.triggerAutoMove();
+            } else {
+                console.log('Waiting for enforcer:', enforcer);
+            }
         }
     }
 
@@ -181,7 +192,7 @@ export class GameScene extends Phaser.Scene {
 
     startHeartbeat() {
         this.heartbeatTimer = this.time.addEvent({
-            delay: 20000, // Every 20 seconds
+            delay: 10000, // Every 10 seconds
             callback: async () => {
                 if (this.mode === 'ONLINE' && this.roomId && this.playerColor) {
                     await supabase
@@ -224,6 +235,12 @@ export class GameScene extends Phaser.Scene {
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
                 this.startTurnTimer();
+            } else if (isNewRoll && this.logic.gameState === 'WAITING_FOR_ROLL') {
+                console.warn('Accepting roll from network as enforcer likely rolled for me.');
+                this.logic.diceRoll = state.last_dice_roll;
+                this.resetDice();
+                this.drawDiceFace(this.logic.diceRoll);
+                this.processRoll(state.last_dice_roll);
             } else if (isDifferentPieces && this.logic.gameState === 'WAITING_FOR_ROLL') {
                 this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
                 this.updateAllPiecePositions(true); // Jump instantly to avoid weirdness
