@@ -25,6 +25,8 @@ export class GameScene extends Phaser.Scene {
         if (!Array.isArray(this.activePlayers) || this.activePlayers.length === 0) {
             this.activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         }
+
+        this.lastUpdateAt = 0; // Timestamp to ignore stale network packets
     }
 
     preload() {
@@ -100,7 +102,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         if (this.mode === 'ONLINE' && this.roomId) {
-            this.online = new LudoOnline(this.roomId, (state) => this.onOnlineUpdate(state));
+            this.online = new LudoOnline(this.roomId, (state, source) => this.onOnlineUpdate(state, source));
             this.online.joinRoom(this.playerColor, this.activePlayers, this.isNewMatch);
             
             this._unloadGame = () => {
@@ -218,43 +220,64 @@ export class GameScene extends Phaser.Scene {
         this.checkAITurn();
     }
 
-    onOnlineUpdate(state) {
+    onOnlineUpdate(state, source) {
         if (!state) return;
+
+        // Check timestamp to avoid older Postgress updates overriding faster Broadcast updates
+        const updateTs = new Date(state.updated_at).getTime();
+        if (updateTs <= this.lastUpdateAt && source !== 'INITIAL') {
+            return; 
+        }
+        this.lastUpdateAt = updateTs;
 
         const isDiferentTurn = state.current_turn !== this.logic.turn;
         const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
         const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
 
         if (state.current_turn === this.playerColor) {
-            // I am the active player. Trust local state, but accept state if my turn JUST started
-            // or if pieces got corrupted/desynced while waiting.
+            // I am the active player.
             if (isDiferentTurn) {
+                console.log(`[${source}] My turn started: ${state.current_turn}. Resetting Dice.`);
                 this.logic.turn = state.current_turn;
                 this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
                 this.logic.gameState = 'WAITING_FOR_ROLL';
+                this.logic.diceRoll = 0;
+                
+                this.clearHighlights();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
+                this.resetDice(); // Ensure dice button is interactive
                 this.startTurnTimer();
             } else if (isNewRoll && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                console.warn('Accepting roll from network as enforcer likely rolled for me.');
+                console.warn(`[${source}] Accepting roll from network (Enforcer):`, state.last_dice_roll);
                 this.logic.diceRoll = state.last_dice_roll;
                 this.resetDice();
                 this.drawDiceFace(this.logic.diceRoll);
                 this.processRoll(state.last_dice_roll);
             } else if (isDifferentPieces && this.logic.gameState === 'WAITING_FOR_ROLL') {
                 this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
-                this.updateAllPiecePositions(true); // Jump instantly to avoid weirdness
+                this.updateAllPiecePositions(true);
             }
             return; 
         }
 
         // I am the receiver (not my turn)
         if (isDiferentTurn || isNewRoll || isDifferentPieces) {
+            console.log(`[${source}] Remote update: Turn=${state.current_turn}, Roll=${state.last_dice_roll}`);
+            
+            const wasDifferentTurn = isDiferentTurn;
             this.logic.turn = state.current_turn;
             this.logic.diceRoll = state.last_dice_roll;
             this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
             
-            this.clearHighlights(); // Clear any phantom highlights from their previous roll
+            // If the turn changed, reset the state for the receiver too
+            if (wasDifferentTurn) {
+                this.logic.gameState = 'WAITING_FOR_ROLL';
+            } else if (isNewRoll) {
+                this.logic.gameState = 'WAITING_FOR_MOVE';
+            }
+
+            this.clearHighlights();
             this.updateAllPiecePositions(false);
             this.updateStatusText();
             
@@ -267,7 +290,7 @@ export class GameScene extends Phaser.Scene {
                 this.resetDice();
             }
 
-            if (isDiferentTurn || isNewRoll) {
+            if (wasDifferentTurn || isNewRoll) {
                 this.startTurnTimer();
             }
 
