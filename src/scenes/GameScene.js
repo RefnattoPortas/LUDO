@@ -234,24 +234,23 @@ export class GameScene extends Phaser.Scene {
         this.lastStateFingerprint = fingerprint;
 
         const serverGameState = state.pieces?._state || 'WAITING_FOR_ROLL';
-        const isDiferentTurn = state.current_turn !== this.logic.turn;
-        const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
         
         // Clean pieces metadata from pieces mapping
-        const cleanPieces = { ...state.pieces };
-        delete cleanPieces._state;
-        const isDifferentPieces = JSON.stringify(cleanPieces) !== JSON.stringify(this.logic.pieces);
+        const remotePieces = JSON.parse(JSON.stringify(state.pieces));
+        delete remotePieces._state;
+
+        const isDiferentTurn = state.current_turn !== this.logic.turn;
+        const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
+        const isDifferentPieces = JSON.stringify(remotePieces) !== JSON.stringify(this.logic.pieces);
 
         console.log(`[${source}] Update: Turn=${state.current_turn}, Roll=${state.last_dice_roll}, State=${serverGameState}`);
 
+        // --- ACTIVE PLAYER (ME) ---
         if (state.current_turn === this.playerColor) {
-            // I am the active player. Only update if turn changed or we got desynced
             if (isDiferentTurn) {
-                console.log(`[${source}] My turn sync: ${state.current_turn}`);
                 this.logic.turn = state.current_turn;
-                this.logic.pieces = JSON.parse(JSON.stringify(cleanPieces));
+                this.logic.pieces = remotePieces;
                 this.logic.gameState = serverGameState;
-                
                 this.clearHighlights();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
@@ -264,24 +263,75 @@ export class GameScene extends Phaser.Scene {
             return; 
         }
 
-        // Receiver logic: Follow the leader
+        // --- RECEIVER (SOMEONE ELSE IS PLAYING) ---
+        let movedPiece = null;
+        if (isDifferentPieces) {
+            // Find which piece moved
+            for (const color of ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
+                for (let i = 0; i < 4; i++) {
+                    if (this.logic.pieces[color][i] !== remotePieces[color][i]) {
+                        movedPiece = { color, index: i, oldPos: this.logic.pieces[color][i], newPos: remotePieces[color][i] };
+                        break;
+                    }
+                }
+                if (movedPiece) break;
+            }
+        }
+
+        const wasDifferentTurn = isDiferentTurn;
         this.logic.turn = state.current_turn;
         this.logic.diceRoll = state.last_dice_roll;
-        this.logic.pieces = JSON.parse(JSON.stringify(cleanPieces));
+        const oldPieces = JSON.parse(JSON.stringify(this.logic.pieces));
+        this.logic.pieces = remotePieces;
         this.logic.gameState = serverGameState;
 
         this.clearHighlights();
-        this.updateAllPiecePositions(false);
         this.updateStatusText();
-        
-        if (this.logic.gameState === 'WAITING_FOR_ROLL') {
+
+        // 1. Handle Dice Roll Animation
+        if (isNewRoll) {
+            this.animateDice(this.logic.diceRoll);
+            this.startTurnTimer();
+        } else if (wasDifferentTurn) {
             this.resetDice();
-        } else {
+            this.startTurnTimer();
+        } else if (this.logic.diceRoll > 0) {
             this.drawDiceFace(this.logic.diceRoll);
         }
 
-        if (isDiferentTurn || isNewRoll) {
-            this.startTurnTimer();
+        // 2. Handle Piece Movement Animation
+        if (movedPiece) {
+            // Restore local state temporarily for animation sequence
+            const targetPieces = JSON.parse(JSON.stringify(this.logic.pieces));
+            this.logic.pieces = oldPieces;
+            
+            this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
+                this.logic.pieces = targetPieces;
+                this.updateAllPiecePositions(true); // Final snap and stack check
+                
+                // If it was a capture (someone else went to base), show ghost effect
+                for (const color of ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
+                    for (let i = 0; i < 4; i++) {
+                        if (oldPieces[color][i] !== 0 && targetPieces[color][i] === 0 && (color !== movedPiece.color || i !== movedPiece.index)) {
+                            // Capture detected!
+                            const capSprite = this.pieceSprites[color][i];
+                            this.cameras.main.shake(150, 0.01);
+                            this.tweens.add({
+                                targets: capSprite,
+                                alpha: 0,
+                                scale: this.pieceScale * 2,
+                                duration: 500,
+                                onComplete: () => {
+                                    this.updateAllPiecePositions(true);
+                                    this.tweens.add({ targets: capSprite, alpha: 1, scale: this.pieceScale, duration: 300 });
+                                }
+                            });
+                        }
+                    }
+                }
+            });
+        } else if (isDifferentPieces || wasDifferentTurn) {
+            this.updateAllPiecePositions(false);
         }
 
         const winner = this.logic.checkWinner();
