@@ -911,7 +911,7 @@ export class GameScene extends Phaser.Scene {
                     });
 
                     // Delay next turn to let ghost effect play out
-                    this.time.delayedCall(700, () => {
+                    this.time.delayedCall(800, () => {
                         this.updateAllPiecePositions(false);
                         
                         // Check for victory

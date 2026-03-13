@@ -226,7 +226,7 @@ export class LobbyScene extends Phaser.Scene {
         }).setOrigin(0, 0.5);
 
         const queueText = this.add.text(-w/2 + 20, 15, `${queueCount} jogadores esperando...`, {
-            fontSize: '14px', fontFamily: 'Arial', fill: color
+            fontSize: '14px', fontFamily: 'Arial', fill: '#ffffff'
         }).setOrigin(0, 0.5);
 
         const icon = this.add.text(w/2 - 40, 0, '⚡', { fontSize: '24px' }).setOrigin(0.5);
