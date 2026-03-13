@@ -26,7 +26,7 @@ export class GameScene extends Phaser.Scene {
             this.activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         }
 
-        this.lastUpdateAt = 0; // Timestamp to ignore stale network packets
+        this.lastStateFingerprint = ''; // To avoid redundant UI refreshes
     }
 
     preload() {
@@ -223,21 +223,23 @@ export class GameScene extends Phaser.Scene {
     onOnlineUpdate(state, source) {
         if (!state) return;
 
-        // Check timestamp to avoid older Postgress updates overriding faster Broadcast updates
-        const updateTs = new Date(state.updated_at).getTime();
-        if (updateTs <= this.lastUpdateAt && source !== 'INITIAL') {
-            return; 
+        // Create a fingerprint of the crucial state to avoid redundant rendering/logic triggers
+        const fingerprint = `${state.current_turn}-${state.last_dice_roll}-${JSON.stringify(state.pieces)}`;
+        if (fingerprint === this.lastStateFingerprint && source !== 'INITIAL') {
+            return; // Exact same state, ignore
         }
-        this.lastUpdateAt = updateTs;
+        this.lastStateFingerprint = fingerprint;
 
         const isDiferentTurn = state.current_turn !== this.logic.turn;
         const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
         const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
 
+        console.log(`[${source}] Update: Turn=${state.current_turn}, Roll=${state.last_dice_roll} (DiffTurn=${isDiferentTurn})`);
+
         if (state.current_turn === this.playerColor) {
             // I am the active player.
             if (isDiferentTurn) {
-                console.log(`[${source}] My turn started: ${state.current_turn}. Resetting Dice.`);
+                console.log(`[${source}] My turn started: ${state.current_turn}. Syncing...`);
                 this.logic.turn = state.current_turn;
                 this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
                 this.logic.gameState = 'WAITING_FOR_ROLL';
@@ -246,10 +248,10 @@ export class GameScene extends Phaser.Scene {
                 this.clearHighlights();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
-                this.resetDice(); // Ensure dice button is interactive
+                this.resetDice(); 
                 this.startTurnTimer();
             } else if (isNewRoll && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                console.warn(`[${source}] Accepting roll from network (Enforcer):`, state.last_dice_roll);
+                console.warn(`[${source}] Accepting roll from network (Enforcer/Lag):`, state.last_dice_roll);
                 this.logic.diceRoll = state.last_dice_roll;
                 this.resetDice();
                 this.drawDiceFace(this.logic.diceRoll);
@@ -263,14 +265,12 @@ export class GameScene extends Phaser.Scene {
 
         // I am the receiver (not my turn)
         if (isDiferentTurn || isNewRoll || isDifferentPieces) {
-            console.log(`[${source}] Remote update: Turn=${state.current_turn}, Roll=${state.last_dice_roll}`);
-            
             const wasDifferentTurn = isDiferentTurn;
             this.logic.turn = state.current_turn;
             this.logic.diceRoll = state.last_dice_roll;
             this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
             
-            // If the turn changed, reset the state for the receiver too
+            // Sync game state machine
             if (wasDifferentTurn) {
                 this.logic.gameState = 'WAITING_FOR_ROLL';
             } else if (isNewRoll) {
@@ -290,6 +290,7 @@ export class GameScene extends Phaser.Scene {
                 this.resetDice();
             }
 
+            // Always restart timer on turn change or roll
             if (wasDifferentTurn || isNewRoll) {
                 this.startTurnTimer();
             }
