@@ -512,12 +512,12 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     async cleanupStalePlayers() {
-        // 1. Delete inactive players
-        const twentyFiveSecondsAgo = new Date(Date.now() - 25000).toISOString();
+        // 1. Delete inactive players (increased threshold to 60s for stability)
+        const sixtySecondsAgo = new Date(Date.now() - 60000).toISOString();
         const { error } = await supabase
             .from('ludo_players')
             .delete()
-            .lt('last_active', twentyFiveSecondsAgo);
+            .lt('last_active', sixtySecondsAgo);
         
         if (error) console.warn('Cleanup error:', error);
 

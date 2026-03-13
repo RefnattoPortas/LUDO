@@ -137,7 +137,7 @@ export class GameScene extends Phaser.Scene {
                 if (this.timeLeft === 0) {
                     this.handleTimeout();
                 } else if (this.timeLeft === -7 && this.mode === 'ONLINE') {
-                    // Safety trigger if the current player didn't respond
+                    // Safety trigger for remote player sync
                     this.forceNonRespondingTimeout();
                 }
             }
@@ -175,6 +175,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     triggerAutoMove() {
+        if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) {
+            // Only enforcer (handled in forceNonRespondingTimeout) or owner can trigger
+            return;
+        }
+
         this.clearHighlights();
         
         if (this.logic.gameState === 'WAITING_FOR_ROLL') {
@@ -182,12 +187,12 @@ export class GameScene extends Phaser.Scene {
             const value = this.logic.rollDice();
             if (value) {
                 if (this.mode === 'ONLINE') {
-                    this.online.updateGame(this.logic.turn, value, this.logic.pieces);
+                    this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState);
                 }
                 this.processRoll(value);
             }
         } else {
-            this.forceAITurn = true; // Ensure handleAIMove knows to use AI logic
+            this.forceAITurn = true; 
             this.handleAIMove();
         }
     }
@@ -208,11 +213,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     goToNextTurn() {
-        // Delay removed, transition immediately
         this.logic.nextTurn();
         
         if (this.mode === 'ONLINE') {
-            this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
+            this.online.updateGame(this.logic.turn, 0, this.logic.pieces, this.logic.gameState);
         }
         
         this.updateStatusText();
@@ -223,83 +227,65 @@ export class GameScene extends Phaser.Scene {
     onOnlineUpdate(state, source) {
         if (!state) return;
 
-        // Create a fingerprint of the crucial state to avoid redundant rendering/logic triggers
         const fingerprint = `${state.current_turn}-${state.last_dice_roll}-${JSON.stringify(state.pieces)}`;
         if (fingerprint === this.lastStateFingerprint && source !== 'INITIAL') {
-            return; // Exact same state, ignore
+            return; 
         }
         this.lastStateFingerprint = fingerprint;
 
+        const serverGameState = state.pieces?._state || 'WAITING_FOR_ROLL';
         const isDiferentTurn = state.current_turn !== this.logic.turn;
         const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
-        const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
+        
+        // Clean pieces metadata from pieces mapping
+        const cleanPieces = { ...state.pieces };
+        delete cleanPieces._state;
+        const isDifferentPieces = JSON.stringify(cleanPieces) !== JSON.stringify(this.logic.pieces);
 
-        console.log(`[${source}] Update: Turn=${state.current_turn}, Roll=${state.last_dice_roll} (DiffTurn=${isDiferentTurn})`);
+        console.log(`[${source}] Update: Turn=${state.current_turn}, Roll=${state.last_dice_roll}, State=${serverGameState}`);
 
         if (state.current_turn === this.playerColor) {
-            // I am the active player.
+            // I am the active player. Only update if turn changed or we got desynced
             if (isDiferentTurn) {
-                console.log(`[${source}] My turn started: ${state.current_turn}. Syncing...`);
+                console.log(`[${source}] My turn sync: ${state.current_turn}`);
                 this.logic.turn = state.current_turn;
-                this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
-                this.logic.gameState = 'WAITING_FOR_ROLL';
-                this.logic.diceRoll = 0;
+                this.logic.pieces = JSON.parse(JSON.stringify(cleanPieces));
+                this.logic.gameState = serverGameState;
                 
                 this.clearHighlights();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
-                this.resetDice(); 
+                if (this.logic.gameState === 'WAITING_FOR_ROLL') this.resetDice();
                 this.startTurnTimer();
             } else if (isNewRoll && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                console.warn(`[${source}] Accepting roll from network (Enforcer/Lag):`, state.last_dice_roll);
                 this.logic.diceRoll = state.last_dice_roll;
-                this.resetDice();
-                this.drawDiceFace(this.logic.diceRoll);
                 this.processRoll(state.last_dice_roll);
-            } else if (isDifferentPieces && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
-                this.updateAllPiecePositions(true);
             }
             return; 
         }
 
-        // I am the receiver (not my turn)
-        if (isDiferentTurn || isNewRoll || isDifferentPieces) {
-            const wasDifferentTurn = isDiferentTurn;
-            this.logic.turn = state.current_turn;
-            this.logic.diceRoll = state.last_dice_roll;
-            this.logic.pieces = JSON.parse(JSON.stringify(state.pieces));
-            
-            // Sync game state machine
-            if (wasDifferentTurn) {
-                this.logic.gameState = 'WAITING_FOR_ROLL';
-            } else if (isNewRoll) {
-                this.logic.gameState = 'WAITING_FOR_MOVE';
-            }
+        // Receiver logic: Follow the leader
+        this.logic.turn = state.current_turn;
+        this.logic.diceRoll = state.last_dice_roll;
+        this.logic.pieces = JSON.parse(JSON.stringify(cleanPieces));
+        this.logic.gameState = serverGameState;
 
-            this.clearHighlights();
-            this.updateAllPiecePositions(false);
-            this.updateStatusText();
-            
-            if (isNewRoll) {
-                this.resetDice();
-                this.drawDiceFace(this.logic.diceRoll);
-            } else if (this.logic.diceRoll > 0) {
-                this.drawDiceFace(this.logic.diceRoll);
-            } else {
-                this.resetDice();
-            }
-
-            // Always restart timer on turn change or roll
-            if (wasDifferentTurn || isNewRoll) {
-                this.startTurnTimer();
-            }
-
-            const winner = this.logic.checkWinner();
-            if (winner) {
-                this.handleVictory(winner);
-            }
+        this.clearHighlights();
+        this.updateAllPiecePositions(false);
+        this.updateStatusText();
+        
+        if (this.logic.gameState === 'WAITING_FOR_ROLL') {
+            this.resetDice();
+        } else {
+            this.drawDiceFace(this.logic.diceRoll);
         }
+
+        if (isDiferentTurn || isNewRoll) {
+            this.startTurnTimer();
+        }
+
+        const winner = this.logic.checkWinner();
+        if (winner) this.handleVictory(winner);
     }
 
     drawBoard() {
@@ -619,7 +605,7 @@ export class GameScene extends Phaser.Scene {
         const value = this.logic.rollDice();
         if (value) {
             if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, value, this.logic.pieces);
+                this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState);
             }
             this.processRoll(value);
         }
@@ -843,7 +829,7 @@ export class GameScene extends Phaser.Scene {
         
         if (result && result.success) {
             if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces);
+                this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces, this.logic.gameState);
             }
             // Restore overlapping pieces to default position before animating
             this.updateAllPiecePositions(true, color, index);

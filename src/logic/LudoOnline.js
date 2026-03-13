@@ -68,13 +68,13 @@ export class LudoOnline {
         this.onStateUpdate(initialState, 'INITIAL');
     }
 
-    async updateGame(turn, roll, pieces) {
+    async updateGame(turn, roll, pieces, gameState) {
         const cleanPieces = JSON.parse(JSON.stringify(pieces));
         const payload = { 
             room_id: this.roomId,
             current_turn: turn, 
             last_dice_roll: roll, 
-            pieces: cleanPieces, 
+            pieces: { ...cleanPieces, _state: gameState }, 
             updated_at: new Date().toISOString()
         };
 
