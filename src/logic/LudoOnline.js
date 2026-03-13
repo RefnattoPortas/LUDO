@@ -69,11 +69,12 @@ export class LudoOnline {
     }
 
     async updateGame(turn, roll, pieces) {
+        const cleanPieces = JSON.parse(JSON.stringify(pieces));
         const payload = { 
             room_id: this.roomId,
             current_turn: turn, 
             last_dice_roll: roll, 
-            pieces, 
+            pieces: cleanPieces, 
             updated_at: new Date().toISOString()
         };
 

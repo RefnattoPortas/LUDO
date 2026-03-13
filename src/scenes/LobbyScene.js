@@ -161,18 +161,30 @@ export class LobbyScene extends Phaser.Scene {
         // On mobile and desktop, we now use a consistent LIST layout for "infinite" scroll feel
         let currentY = this.listY + 50; 
 
-        // --- MATCHMAKING SECTION (Always top list items) ---
-        this.createMatchmakingCardList(cx, currentY, 2);
-        currentY += 100;
-        this.createMatchmakingCardList(cx, currentY, 4);
-        currentY += 120;
-
-        // --- PUBLIC ROOMS SECTION ---
+        // Fetch all rooms first to calculate queue counts
         const { data: rooms } = await supabase
             .from('ludo_rooms')
             .select(`*, ludo_players (id)`)
             .order('id', { ascending: true });
 
+        // Calculate how many people are waiting in rooms of each size
+        const getQueueCount = (size) => {
+            if (!rooms) return 0;
+            return rooms
+                .filter(r => r.max_players === size && r.status === 'LIVRE')
+                .reduce((acc, r) => acc + (r.ludo_players?.length || 0), 0);
+        };
+
+        // --- MATCHMAKING SECTION ---
+        const queue2 = getQueueCount(2);
+        const queue4 = getQueueCount(4);
+
+        this.createMatchmakingCardList(cx, currentY, 2, queue2);
+        currentY += 100;
+        this.createMatchmakingCardList(cx, currentY, 4, queue4);
+        currentY += 120;
+
+        // --- PUBLIC ROOMS SECTION ---
         if (rooms) {
             const sectionTitle = this.add.text(cx, currentY, 'Salas Públicas', {
                 fontSize: '18px', fontFamily: 'Arial Black', fill: '#888'
@@ -192,7 +204,7 @@ export class LobbyScene extends Phaser.Scene {
         this.maxScrollY = currentY;
     }
 
-    createMatchmakingCardList(x, y, size) {
+    createMatchmakingCardList(x, y, size, queueCount = 0) {
         const container = this.add.container(x, y);
         this.roomsContainer.add(container);
         const w = 360, h = 80;
@@ -209,13 +221,17 @@ export class LobbyScene extends Phaser.Scene {
         card.lineStyle(3, color, 1);
         card.strokeRoundedRect(-w/2, -h/2, w, h, 15);
 
-        const title = this.add.text(-w/2 + 20, 0, `ALEATÓRIO (${size} JOG.)`, {
+        const title = this.add.text(-w/2 + 20, -10, `ALEATÓRIO (${size} JOG.)`, {
             fontSize: '18px', fontFamily: 'Arial Black', fill: '#fff'
+        }).setOrigin(0, 0.5);
+
+        const queueText = this.add.text(-w/2 + 20, 15, `${queueCount} jogadores esperando...`, {
+            fontSize: '14px', fontFamily: 'Arial', fill: color
         }).setOrigin(0, 0.5);
 
         const icon = this.add.text(w/2 - 40, 0, '⚡', { fontSize: '24px' }).setOrigin(0.5);
 
-        container.add([shadow, card, title, icon]);
+        container.add([shadow, card, title, queueText, icon]);
         container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
 
         container.on('pointerover', () => {
@@ -540,7 +556,7 @@ export class LobbyScene extends Phaser.Scene {
                 roomId: this.joinedRoom.id,
                 playerColor: this.myColor,
                 activePlayers: activePlayers,
-                isNewMatch: true
+                isNewMatch: (this.myColor === activePlayers[0]) // Only host/first player resets
             });
         });
     }
