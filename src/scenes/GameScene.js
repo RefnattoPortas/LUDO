@@ -127,18 +127,29 @@ export class GameScene extends Phaser.Scene {
         this.timeLeft = 11;
         this.updateStatusText();
 
+        // Only run the timer if it's my turn (online) or any human turn (local/IA)
+        // Remote players' turns are NOT timed locally to avoid conflicting auto-moves
+        const isMyTurnOnline = this.mode === 'ONLINE' && this.logic.turn === this.playerColor;
+        const isLocalHumanTurn = this.mode !== 'ONLINE' && !this.aiPlayers.includes(this.logic.turn);
+
+        if (!isMyTurnOnline && !isLocalHumanTurn) {
+            // For remote players online: start a separate "enforcer" timer
+            // that only fires if nothing has changed after a very long delay
+            if (this.mode === 'ONLINE') {
+                this._enforcerTurnSnapshot = `${this.logic.turn}-${JSON.stringify(this.logic.pieces)}`;
+                this.time.delayedCall(18000, () => this.forceNonRespondingTimeout());
+            }
+            return;
+        }
+
         this.turnTimer = this.time.addEvent({
             delay: 1000,
-            repeat: 25, // More repeats to handle "stalled" players
+            repeat: 12,
             callback: () => {
                 this.timeLeft--;
                 this.updateStatusText();
-                
                 if (this.timeLeft === 0) {
                     this.handleTimeout();
-                } else if (this.timeLeft === -7 && this.mode === 'ONLINE') {
-                    // Safety trigger for remote player sync
-                    this.forceNonRespondingTimeout();
                 }
             }
         });
@@ -155,33 +166,33 @@ export class GameScene extends Phaser.Scene {
     }
 
     forceNonRespondingTimeout() {
-        // Double check turn hasn't changed
+        // Check if the state has changed since we started the enforcer timer
+        const currentSnapshot = `${this.logic.turn}-${JSON.stringify(this.logic.pieces)}`;
+        if (currentSnapshot !== this._enforcerTurnSnapshot) {
+            // State already changed, the remote player acted — do nothing
+            console.log('[Enforcer] Snapshot changed, remote player already acted.');
+            return;
+        }
+
+        // Only fire if it's still the remote player's turn
         if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) {
-            // To avoid race conditions where multiple players roll for the timed-out player,
-            // only the player whose color comes first in the sorted list of active players
-            // (excluding the one who is currently timeout-ing) should perform the auto-move.
-            
+            // Only the player whose color comes first alphabetically among the others should enforce
             const others = this.activePlayers.filter(p => p !== this.logic.turn);
             const enforcer = others.sort()[0];
-            
+
             if (this.playerColor === enforcer) {
-                console.warn('I am the enforcer. Triggering remote timeout for:', this.logic.turn);
+                console.warn('[Enforcer] Triggering remote timeout for:', this.logic.turn);
                 this.showTemporaryMessage(this.logic.turn, 'Jogador\nAusente...');
-                this.triggerAutoMove();
+                this.triggerAutoMoveForColor(this.logic.turn);
             } else {
-                console.log('Waiting for enforcer:', enforcer);
+                console.log('[Enforcer] Not the enforcer, waiting:', enforcer);
             }
         }
     }
 
     triggerAutoMove() {
-        if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) {
-            // Only enforcer (handled in forceNonRespondingTimeout) or owner can trigger
-            return;
-        }
-
+        // Called when MY timer runs out (my own turn)
         this.clearHighlights();
-        
         if (this.logic.gameState === 'WAITING_FOR_ROLL') {
             this.forceAITurn = true;
             const value = this.logic.rollDice();
@@ -192,8 +203,54 @@ export class GameScene extends Phaser.Scene {
                 this.processRoll(value);
             }
         } else {
-            this.forceAITurn = true; 
+            this.forceAITurn = true;
             this.handleAIMove();
+        }
+    }
+
+    triggerAutoMoveForColor(color) {
+        // Called by enforcer for a remote player that is not responding
+        // Temporarily act as that player's AI
+        if (this.logic.turn !== color) return;
+        this.clearHighlights();
+        if (this.logic.gameState === 'WAITING_FOR_ROLL') {
+            const value = this.logic.rollDice();
+            if (value) {
+                this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState);
+                // Process locally so enforcer sees the result and can send move too
+                const savedAI = this.forceAITurn;
+                this.forceAITurn = true;
+                this.processRoll(value);
+                this.forceAITurn = savedAI;
+            }
+        } else if (this.logic.gameState === 'WAITING_FOR_MOVE') {
+            const pieceIndex = this.ai.decideMove(this.logic.turn, this.logic.diceRoll);
+            if (pieceIndex !== null) {
+                this.clearHighlights();
+                const oldLogPos = this.logic.pieces[color][pieceIndex];
+                const result = this.logic.movePiece(pieceIndex);
+                if (result && result.success) {
+                    this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces, this.logic.gameState);
+                    this.animatePath(color, pieceIndex, result.oldPos, result.newPos, () => {
+                        this.updateAllPiecePositions(false);
+                        const winner = this.logic.checkWinner();
+                        if (winner) { this.handleVictory(winner); return; }
+                        if (result.shouldNextTurn) {
+                            this.goToNextTurn();
+                        } else {
+                            this.resetDice();
+                            this.updateStatusText();
+                            this.startTurnTimer();
+                        }
+                    });
+                }
+            } else {
+                // No moves: pass turn
+                this.logic.nextTurn();
+                this.online.updateGame(this.logic.turn, 0, this.logic.pieces, this.logic.gameState);
+                this.updateStatusText();
+                this.startTurnTimer();
+            }
         }
     }
 
@@ -229,12 +286,12 @@ export class GameScene extends Phaser.Scene {
 
         const fingerprint = `${state.current_turn}-${state.last_dice_roll}-${JSON.stringify(state.pieces)}`;
         if (fingerprint === this.lastStateFingerprint && source !== 'INITIAL') {
-            return; 
+            return;
         }
         this.lastStateFingerprint = fingerprint;
 
         const serverGameState = state.pieces?._state || 'WAITING_FOR_ROLL';
-        
+
         // Clean pieces metadata from pieces mapping
         const remotePieces = JSON.parse(JSON.stringify(state.pieces));
         delete remotePieces._state;
@@ -245,25 +302,41 @@ export class GameScene extends Phaser.Scene {
 
         console.log(`[${source}] Update: Turn=${state.current_turn}, Roll=${state.last_dice_roll}, State=${serverGameState}`);
 
-        // --- ACTIVE PLAYER (ME) ---
+        // ALWAYS stop any running timer when we receive an update from server.
+        // This prevents stale timers from firing auto-moves on the wrong client.
+        if (isDiferentTurn || isNewRoll || isDifferentPieces) {
+            if (this.turnTimer) {
+                this.turnTimer.remove();
+                this.turnTimer = null;
+            }
+        }
+
+        // --- ACTIVE PLAYER (MY TURN) ---
         if (state.current_turn === this.playerColor) {
-            if (isDiferentTurn) {
+            if (isDiferentTurn || source === 'INITIAL') {
+                // It's now my turn — sync state from server and let me play
                 this.logic.turn = state.current_turn;
                 this.logic.pieces = remotePieces;
                 this.logic.gameState = serverGameState;
+                this.logic.diceRoll = state.last_dice_roll || 0;
+                this.logic.consecutiveSixes = 0; // Reset on new turn arrival
                 this.clearHighlights();
                 this.updateAllPiecePositions(false);
                 this.updateStatusText();
-                if (this.logic.gameState === 'WAITING_FOR_ROLL') this.resetDice();
+                if (this.logic.gameState === 'WAITING_FOR_ROLL') {
+                    this.resetDice();
+                } else if (this.logic.gameState === 'WAITING_FOR_MOVE' && this.logic.diceRoll > 0) {
+                    // Edge case: arrived mid-move phase, re-highlight
+                    this.drawDiceFace(this.logic.diceRoll);
+                    this.highlightPossibleMoves();
+                }
                 this.startTurnTimer();
-            } else if (isNewRoll && this.logic.gameState === 'WAITING_FOR_ROLL') {
-                this.logic.diceRoll = state.last_dice_roll;
-                this.processRoll(state.last_dice_roll);
             }
-            return; 
+            // Don't process rolls that came from server if we are the one who sent them
+            return;
         }
 
-        // --- RECEIVER (SOMEONE ELSE IS PLAYING) ---
+        // --- OBSERVER (SOMEONE ELSE IS PLAYING) ---
         let movedPiece = null;
         if (isDifferentPieces) {
             // Find which piece moved
@@ -291,10 +364,10 @@ export class GameScene extends Phaser.Scene {
         // 1. Handle Dice Roll Animation
         if (isNewRoll) {
             this.animateDice(this.logic.diceRoll);
-            this.startTurnTimer();
+            this.startTurnTimer(); // Start enforcer timer for remote player
         } else if (wasDifferentTurn) {
             this.resetDice();
-            this.startTurnTimer();
+            this.startTurnTimer(); // Start enforcer timer for remote player
         } else if (this.logic.diceRoll > 0) {
             this.drawDiceFace(this.logic.diceRoll);
         }
@@ -304,16 +377,15 @@ export class GameScene extends Phaser.Scene {
             // Restore local state temporarily for animation sequence
             const targetPieces = JSON.parse(JSON.stringify(this.logic.pieces));
             this.logic.pieces = oldPieces;
-            
+
             this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
                 this.logic.pieces = targetPieces;
-                this.updateAllPiecePositions(true); // Final snap and stack check
-                
+                this.updateAllPiecePositions(true);
+
                 // If it was a capture (someone else went to base), show ghost effect
                 for (const color of ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
                     for (let i = 0; i < 4; i++) {
                         if (oldPieces[color][i] !== 0 && targetPieces[color][i] === 0 && (color !== movedPiece.color || i !== movedPiece.index)) {
-                            // Capture detected!
                             const capSprite = this.pieceSprites[color][i];
                             this.cameras.main.shake(150, 0.01);
                             this.tweens.add({
