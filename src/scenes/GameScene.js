@@ -27,6 +27,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         this.lastStateFingerprint = ''; // To avoid redundant UI refreshes
+        this.lastUpdateTimestamp = 0; // To ignore older states arriving late
     }
 
     preload() {
@@ -127,32 +128,29 @@ export class GameScene extends Phaser.Scene {
         this.timeLeft = 11;
         this.updateStatusText();
 
-        // Only run the timer if it's my turn (online) or any human turn (local/IA)
-        // Remote players' turns are NOT timed locally to avoid conflicting auto-moves
-        const isMyTurnOnline = this.mode === 'ONLINE' && this.logic.turn === this.playerColor;
-        const isLocalHumanTurn = this.mode !== 'ONLINE' && !this.aiPlayers.includes(this.logic.turn);
-
-        if (!isMyTurnOnline && !isLocalHumanTurn) {
-            // For remote players online: start a separate "enforcer" timer
-            // that only fires if nothing has changed after a very long delay
-            if (this.mode === 'ONLINE') {
-                this._enforcerTurnSnapshot = `${this.logic.turn}-${JSON.stringify(this.logic.pieces)}`;
-                this.time.delayedCall(18000, () => this.forceNonRespondingTimeout());
-            }
-            return;
-        }
-
+        // RUN TIMER VISUALLY FOR EVERYONE
         this.turnTimer = this.time.addEvent({
             delay: 1000,
             repeat: 12,
             callback: () => {
                 this.timeLeft--;
                 this.updateStatusText();
+                
+                // Only THE RESPONSIBLE PLAYER (or enforcer) triggers the actual timeout action
                 if (this.timeLeft === 0) {
                     this.handleTimeout();
                 }
             }
         });
+
+        // Enforcer logic for remote players (stays the same)
+        const isMyTurnOnline = this.mode === 'ONLINE' && this.logic.turn === this.playerColor;
+        const isLocalHumanTurn = this.mode !== 'ONLINE' && !this.aiPlayers.includes(this.logic.turn);
+
+        if (!isMyTurnOnline && !isLocalHumanTurn && this.mode === 'ONLINE') {
+            this._enforcerTurnSnapshot = `${this.logic.turn}-${JSON.stringify(this.logic.pieces)}`;
+            this.time.delayedCall(18000, () => this.forceNonRespondingTimeout());
+        }
     }
 
 
@@ -191,14 +189,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     triggerAutoMove() {
-        // Called when MY timer runs out (my own turn)
+        // Stop current animation if any
+        this.isAnimating = false;
         this.clearHighlights();
+        
         if (this.logic.gameState === 'WAITING_FOR_ROLL') {
             this.forceAITurn = true;
             const value = this.logic.rollDice();
             if (value) {
                 if (this.mode === 'ONLINE') {
-                    this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState);
+                    const now = new Date().toISOString();
+                    this.lastUpdateTimestamp = new Date(now).getTime();
+                    this.lastStateFingerprint = `${this.logic.turn}-${value}-${JSON.stringify(this.logic.pieces)}`;
+                    this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState, now);
                 }
                 this.processRoll(value);
             }
@@ -277,9 +280,10 @@ export class GameScene extends Phaser.Scene {
         console.log(`[TurnTransition] From ${oldTurn} to ${newTurn}`);
 
         if (this.mode === 'ONLINE') {
-            // Update local fingerprint to expect the echo we're about to send
+            const now = new Date().toISOString();
+            this.lastUpdateTimestamp = new Date(now).getTime();
             this.lastStateFingerprint = `${newTurn}-0-${JSON.stringify(this.logic.pieces)}`;
-            this.online.updateGame(newTurn, 0, this.logic.pieces, this.logic.gameState);
+            this.online.updateGame(newTurn, 0, this.logic.pieces, this.logic.gameState, now);
         }
         
         this.updateStatusText();
@@ -289,6 +293,14 @@ export class GameScene extends Phaser.Scene {
 
     onOnlineUpdate(state, source) {
         if (!state) return;
+
+        // 1. Timestamp safety: ignore older updates
+        const updateTime = state.updated_at ? new Date(state.updated_at).getTime() : 0;
+        if (source !== 'INITIAL' && updateTime < this.lastUpdateTimestamp) {
+            console.log(`[${source}] Ignoring stale update (${updateTime} < ${this.lastUpdateTimestamp})`);
+            return;
+        }
+        this.lastUpdateTimestamp = updateTime;
 
         const fingerprint = `${state.current_turn}-${state.last_dice_roll}-${JSON.stringify(state.pieces)}`;
         if (fingerprint === this.lastStateFingerprint && source !== 'INITIAL') {
@@ -311,7 +323,13 @@ export class GameScene extends Phaser.Scene {
 
         // Capture pre-update state for comparisons and animation
         const isTurnChange = state.current_turn !== this.logic.turn;
-        const isNewRoll = state.last_dice_roll !== this.logic.diceRoll && state.last_dice_roll > 0;
+        
+        // Better roll detection: check value AND state transition (helps with consecutive same values)
+        const isNewRoll = (state.last_dice_roll > 0) && (
+            state.last_dice_roll !== this.logic.diceRoll || 
+            (serverGameState === 'WAITING_FOR_MOVE' && this.logic.gameState === 'WAITING_FOR_ROLL')
+        );
+
         const isDifferentPieces = JSON.stringify(remotePieces) !== JSON.stringify(this.logic.pieces);
         const oldPieces = JSON.parse(JSON.stringify(this.logic.pieces));
 
@@ -407,7 +425,7 @@ export class GameScene extends Phaser.Scene {
                 }
             });
         } else if (isDifferentPieces || isTurnChange) {
-            this.updateAllPiecePositions(false);
+            this.updateAllPiecePositions(true);
         }
 
         // Start enforcer timer for the remote player's turn
@@ -815,7 +833,11 @@ export class GameScene extends Phaser.Scene {
         const value = this.logic.rollDice();
         if (value) {
             if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState);
+                const now = new Date().toISOString();
+                this.lastUpdateTimestamp = new Date(now).getTime();
+                // Set local fingerprint before sending to ignore the echo
+                this.lastStateFingerprint = `${this.logic.turn}-${value}-${JSON.stringify(this.logic.pieces)}`;
+                this.online.updateGame(this.logic.turn, value, this.logic.pieces, this.logic.gameState, now);
             }
             this.processRoll(value);
         }
@@ -1067,9 +1089,11 @@ export class GameScene extends Phaser.Scene {
         
         if (result && result.success) {
             if (this.mode === 'ONLINE') {
+                const now = new Date().toISOString();
+                this.lastUpdateTimestamp = new Date(now).getTime();
                 // Update local fingerprint immediately to ignore our own echo
                 this.lastStateFingerprint = `${this.logic.turn}-${this.logic.diceRoll}-${JSON.stringify(this.logic.pieces)}`;
-                this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces, this.logic.gameState);
+                this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces, this.logic.gameState, now);
             }
             // Restore overlapping pieces to default position before animating
             this.updateAllPiecePositions(true, color, index);

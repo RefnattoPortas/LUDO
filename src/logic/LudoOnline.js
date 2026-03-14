@@ -87,14 +87,15 @@ export class LudoOnline {
         this.onStateUpdate(initialState, 'INITIAL');
     }
 
-    async updateGame(turn, roll, pieces, gameState) {
+    async updateGame(turn, roll, pieces, gameState, timestamp = null) {
         const cleanPieces = JSON.parse(JSON.stringify(pieces));
+        const finalTimestamp = timestamp || new Date().toISOString();
         const payload = { 
             room_id: this.roomId,
             current_turn: turn, 
             last_dice_roll: roll, 
             pieces: { ...cleanPieces, _state: gameState }, 
-            updated_at: new Date().toISOString()
+            updated_at: finalTimestamp
         };
 
         // 1. Instant sync via Broadcast
