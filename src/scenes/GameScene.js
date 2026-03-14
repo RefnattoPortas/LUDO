@@ -270,10 +270,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     goToNextTurn() {
+        const oldTurn = this.logic.turn;
         this.logic.nextTurn();
+        const newTurn = this.logic.turn;
         
+        console.log(`[TurnTransition] From ${oldTurn} to ${newTurn}`);
+
         if (this.mode === 'ONLINE') {
-            this.online.updateGame(this.logic.turn, 0, this.logic.pieces, this.logic.gameState);
+            // Update local fingerprint to expect the echo we're about to send
+            this.lastStateFingerprint = `${newTurn}-0-${JSON.stringify(this.logic.pieces)}`;
+            this.online.updateGame(newTurn, 0, this.logic.pieces, this.logic.gameState);
         }
         
         this.updateStatusText();
@@ -288,8 +294,15 @@ export class GameScene extends Phaser.Scene {
         if (fingerprint === this.lastStateFingerprint && source !== 'INITIAL') {
             return;
         }
-        this.lastStateFingerprint = fingerprint;
 
+        // If we are currently animating a local move, defer non-essential updates 
+        // to avoid snapping pieces or skipping turns.
+        if (this.isAnimating && source !== 'INITIAL' && state.current_turn === this.playerColor) {
+            console.log(`[${source}] Deferring update while animating...`);
+            return;
+        }
+
+        this.lastStateFingerprint = fingerprint;
         const serverGameState = state.pieces?._state || 'WAITING_FOR_ROLL';
 
         // Clean pieces metadata from pieces mapping
@@ -302,7 +315,7 @@ export class GameScene extends Phaser.Scene {
         const isDifferentPieces = JSON.stringify(remotePieces) !== JSON.stringify(this.logic.pieces);
         const oldPieces = JSON.parse(JSON.stringify(this.logic.pieces));
 
-        console.log(`[${source}] Turn=${state.current_turn}, Roll=${state.last_dice_roll}, State=${serverGameState}, myColor=${this.playerColor}`);
+        console.log(`[${source}] Turn=${state.current_turn}, Roll=${state.last_dice_roll}, State=${serverGameState}, LocalTurn=${this.logic.turn}, isAnimating=${this.isAnimating}`);
 
         // Stop stale local timers on any meaningful update
         if ((isTurnChange || isNewRoll || isDifferentPieces) && this.turnTimer) {
@@ -311,10 +324,13 @@ export class GameScene extends Phaser.Scene {
         }
 
         // === FULLY APPLY SERVER STATE (always, for all clients) ===
-        this.logic.turn = state.current_turn;
-        this.logic.diceRoll = state.last_dice_roll || 0;
-        this.logic.pieces = remotePieces;
-        this.logic.gameState = serverGameState;
+        // Safety: If we are animating, only update Turn if it's a confirmed transition from someone else
+        if (!this.isAnimating || isTurnChange) {
+            this.logic.turn = state.current_turn;
+            this.logic.diceRoll = state.last_dice_roll || 0;
+            this.logic.pieces = remotePieces;
+            this.logic.gameState = serverGameState;
+        }
 
         this.clearHighlights();
         this.updateStatusText();
@@ -322,8 +338,9 @@ export class GameScene extends Phaser.Scene {
         // === MY TURN: enable interaction ===
         if (state.current_turn === this.playerColor) {
             if (isTurnChange || source === 'INITIAL') {
-                // New turn started for me — reset consecutive sixes counter
+                // New turn started for me — reset local safety states
                 this.logic.consecutiveSixes = 0;
+                this.isAnimating = false; 
                 this.updateAllPiecePositions(false);
                 if (serverGameState === 'WAITING_FOR_ROLL') {
                     this.resetDice();
@@ -333,7 +350,6 @@ export class GameScene extends Phaser.Scene {
                 }
                 this.startTurnTimer();
             }
-            // Don't process remote event further — I'm the one who will act
             return;
         }
 
@@ -1051,6 +1067,8 @@ export class GameScene extends Phaser.Scene {
         
         if (result && result.success) {
             if (this.mode === 'ONLINE') {
+                // Update local fingerprint immediately to ignore our own echo
+                this.lastStateFingerprint = `${this.logic.turn}-${this.logic.diceRoll}-${JSON.stringify(this.logic.pieces)}`;
                 this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces, this.logic.gameState);
             }
             // Restore overlapping pieces to default position before animating
@@ -1095,7 +1113,10 @@ export class GameScene extends Phaser.Scene {
                         }
 
                         if (result.shouldNextTurn) {
-                            this.goToNextTurn();
+                            // Safety: verify we still own the turn before passing it
+                            if (this.logic.turn === color || this.mode !== 'ONLINE') {
+                                this.goToNextTurn();
+                            }
                         } else {
                             this.resetDice();
                             this.updateStatusText();
@@ -1115,7 +1136,10 @@ export class GameScene extends Phaser.Scene {
                     }
 
                     if (result.shouldNextTurn) {
-                        this.goToNextTurn();
+                        // Safety: verify we still own the turn before passing it
+                        if (this.logic.turn === color || this.mode !== 'ONLINE') {
+                            this.goToNextTurn();
+                        }
                     } else {
                         this.resetDice();
                         this.updateStatusText();

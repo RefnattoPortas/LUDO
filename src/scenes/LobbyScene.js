@@ -466,8 +466,8 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     async onPlayerUpdate() {
-        if (!this.joinedRoom) {
-            await this.refreshRooms();
+        if (!this.sys || !this.sys.isActive() || !this.joinedRoom) {
+            if (!this.joinedRoom) await this.refreshRooms();
             return;
         }
 
@@ -477,12 +477,16 @@ export class LobbyScene extends Phaser.Scene {
             .select('color')
             .eq('room_id', this.joinedRoom.id);
         
+        if (!this.sys || !this.sys.isActive()) return;
+
         const count = players?.length || 0;
-        this.waitingStatus.setText(`Jogadores: ${count}/${this.joinedRoom.max_players}`);
+        if (this.waitingStatus) {
+            this.waitingStatus.setText(`Jogadores: ${count}/${this.joinedRoom.max_players}`);
+        }
 
         if (count >= this.joinedRoom.max_players) {
-            this.waitingTitle.setText('SALA CHEIA!');
-            this.waitingStatus.setText('Iniciando partida...');
+            if (this.waitingTitle) this.waitingTitle.setText('SALA CHEIA!');
+            if (this.waitingStatus) this.waitingStatus.setText('Iniciando partida...');
             
             // Get all players colors and sort them to maintain consistent turn order
             const colors = players.map(p => p.color);
