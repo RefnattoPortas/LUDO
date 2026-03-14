@@ -681,20 +681,24 @@ export class GameScene extends Phaser.Scene {
     }
 
     _setActiveDice(color) {
-        // Stop all pulse tweens
-        Object.keys(this.dicePulseTweens).forEach(c => {
+        const INACTIVE_ALPHA = 0.3; // How faded inactive dice appear
+
+        // Stop all pulse tweens and dim all dice
+        Object.keys(this.diceContainers).forEach(c => {
+            // Stop pulse tween
             if (this.dicePulseTweens[c]) {
                 this.dicePulseTweens[c].stop();
                 this.dicePulseTweens[c] = null;
             }
-        });
-
-        // Dim all borders
-        Object.keys(this.diceBorders).forEach(c => {
+            // Dim the entire container (not just border)
+            const container = this.diceContainers[c];
+            if (container) container.setAlpha(INACTIVE_ALPHA);
+            // Clear border
             const border = this.diceBorders[c];
-            if (!border) return;
-            border.clear();
-            border.setAlpha(0.15); // Inactive: very faint
+            if (border) { border.clear(); border.setAlpha(0.15); }
+            // Dim shadow
+            const shadow = this.diceShadows[c];
+            if (shadow) shadow.setAlpha(0.15);
         });
 
         // Set the active dice aliases
@@ -706,6 +710,10 @@ export class GameScene extends Phaser.Scene {
         this.diceShadow = this.diceShadows[color];
         this.currentDicePos = this.getDicePosition(color);
         this.currentDiceY = this.currentDicePos.y;
+
+        // Fully activate the active dice
+        if (this.rollButtonContainer) this.rollButtonContainer.setAlpha(1);
+        if (this.diceShadow) this.diceShadow.setAlpha(0.5);
 
         // Activate pulse tween on active border
         if (this.dynamicDiceBorder) {
@@ -722,16 +730,25 @@ export class GameScene extends Phaser.Scene {
     }
 
     resetDice() {
-        // Reset ALL dice faces to GIRAR state
+        // Reset ALL dice faces to GIRAR state, but respect active/inactive alpha
+        const activeTurn = this.logic.turn;
+        const INACTIVE_ALPHA = 0.3;
+
         Object.keys(this.diceTexts).forEach(c => {
+            const isActive = (c === activeTurn);
             const dt = this.diceTexts[c];
             if (dt) { dt.setFontSize('15px'); dt.setText('GIRAR'); dt.setVisible(true); }
             const df = this.diceFaces[c];
             if (df) df.clear();
             const dc = this.diceContainers[c];
-            if (dc) { dc.angle = 0; dc.setScale(this.mainScale); dc.y = this.getDicePosition(c).y; }
+            if (dc) {
+                dc.angle = 0;
+                dc.setScale(this.mainScale);
+                dc.y = this.getDicePosition(c).y;
+                dc.setAlpha(isActive ? 1 : INACTIVE_ALPHA);
+            }
             const ds = this.diceShadows[c];
-            if (ds) { ds.setScale(1); ds.setAlpha(0.5); }
+            if (ds) ds.setAlpha(isActive ? 0.5 : 0.15);
         });
         if (this.dynamicDiceBorder) {
             this.dynamicDiceBorder.setVisible(true);
@@ -772,6 +789,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleRoll() {
+        if (this.isAnimating) return; // Block while moving
         if (this.mode === 'ONLINE') {
             if (this.logic.turn !== this.playerColor || this.logic.gameState !== 'WAITING_FOR_ROLL') return;
         } else if (this.aiPlayers.includes(this.logic.turn) || this.logic.gameState !== 'WAITING_FOR_ROLL') {
@@ -788,13 +806,20 @@ export class GameScene extends Phaser.Scene {
     }
 
     processRoll(value) {
+        // Capture the turn color NOW, before any async delays can change it
+        const rollingColor = this.logic.turn;
+        const rollingConsecSixes = this.logic.consecutiveSixes;
+
         this.updateStatusText();
-        this.animateDice(value);
+        this.animateDice(value, rollingColor);
         
         // Wait for dice animation to finish before highlighting or skipping
         this.time.delayedCall(1300, () => {
-            if (this.logic.consecutiveSixes >= 3) {
-                this.showTemporaryMessage(this.logic.turn, 'Perdeu a vez\n(3 seis)!');
+            // Safety check: if turn has changed (online sync), abort
+            if (this.mode === 'ONLINE' && this.logic.turn !== rollingColor) return;
+
+            if (rollingConsecSixes >= 3) {
+                this.showTemporaryMessage(rollingColor, 'Perdeu a vez\n(3 seis)!');
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
@@ -805,7 +830,7 @@ export class GameScene extends Phaser.Scene {
             }
 
             if (!this.logic.canAnyPieceMove()) {
-                this.showTemporaryMessage(this.logic.turn, 'Sem\njogadas!');
+                this.showTemporaryMessage(rollingColor, 'Sem\njogadas!');
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
@@ -815,8 +840,11 @@ export class GameScene extends Phaser.Scene {
                 return;
             }
 
-            if (this.aiPlayers.includes(this.logic.turn) || this.forceAITurn) {
+            // AI move: only execute if it's still that color's turn
+            if (this.aiPlayers.includes(rollingColor) || this.forceAITurn) {
+                if (this.logic.turn !== rollingColor) return; // Safety: turn changed
                 this.time.delayedCall(600, () => {
+                    if (this.logic.turn !== rollingColor) return; // Safety again
                     this.handleAIMove();
                     this.forceAITurn = false;
                 });
@@ -826,32 +854,47 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
-    animateDice(value) {
-        this.diceText.setVisible(false);
-        this.diceFace.clear();
+    animateDice(value, forColor) {
+        // Capture references at call time — the active dice aliases may change
+        // (e.g. turn advances mid-animation in online mode)
+        const color = forColor || this.logic.turn;
+        const container = this.diceContainers[color];
+        const face = this.diceFaces[color];
+        const text = this.diceTexts[color];
+        const shadow = this.diceShadows[color];
+        const diceY = this.getDicePosition(color).y;
 
-        // 1. Subtle jump and single spin (height reduced by 60%)
+        if (!container || !face || !text) return;
+
+        text.setVisible(false);
+        face.clear();
+
+        // 1. Subtle jump and single spin (scale relative to mainScale)
         this.tweens.add({
-            targets: this.rollButtonContainer,
-            y: this.currentDiceY - (10 * this.mainScale), // Jump height reduced
-            scaleX: 1.05,
-            scaleY: 1.05,
-            angle: 360, // 1 full rotation
+            targets: container,
+            y: diceY - (10 * this.mainScale),
+            scaleX: this.mainScale * 1.05,
+            scaleY: this.mainScale * 1.05,
+            angle: 360,
             duration: 400,
-            yoyo: true,
-            ease: 'Sine.easeOut'
+            ease: 'Sine.easeOut',
+            onComplete: () => {
+                container.setScale(this.mainScale);
+            }
         });
 
         // 2. Shrink shadow accordingly
-        this.tweens.add({
-            targets: this.diceShadow,
-            scaleX: 0.6,
-            scaleY: 0.6,
-            alpha: 0.3,
-            duration: 400,
-            yoyo: true,
-            ease: 'Sine.easeOut'
-        });
+        if (shadow) {
+            this.tweens.add({
+                targets: shadow,
+                scaleX: 0.6,
+                scaleY: 0.6,
+                alpha: 0.3,
+                duration: 400,
+                yoyo: true,
+                ease: 'Sine.easeOut'
+            });
+        }
 
         // 3. Rapidly change faces while jumping
         let rollVal = 1;
@@ -859,21 +902,22 @@ export class GameScene extends Phaser.Scene {
             delay: 50,
             callback: () => {
                 rollVal = (rollVal % 6) + 1;
-                this.drawDiceFace(rollVal);
+                this._drawDiceFaceOn(color, rollVal);
             },
             loop: true
         });
 
-        // 4. Stop much sooner to fit the 400ms duration (total 800ms with yoyo)
+        // 4. Stop and show final value
         this.time.delayedCall(800, () => {
             rollTimer.remove();
-            this.rollButtonContainer.angle = 0; // ensure straight
-            this.drawDiceFace(value);
+            container.angle = 0;
+            container.setScale(this.mainScale);
+            this._drawDiceFaceOn(color, value);
             
-            // tiny bounce on landing
+            // Tiny bounce on landing
             this.tweens.add({
-                targets: this.rollButtonContainer,
-                y: this.currentDiceY + (3 * this.mainScale),
+                targets: container,
+                y: diceY + (3 * this.mainScale),
                 duration: 60,
                 yoyo: true,
                 ease: 'Sine.easeInOut'
@@ -988,6 +1032,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     handlePieceClick(color, index) {
+        if (this.isAnimating) return; // Block while moving
         if (this.mode === 'ONLINE') {
             if (this.logic.turn !== this.playerColor || this.logic.turn !== color) return;
         }
@@ -999,6 +1044,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     executeMove(color, index) {
+        this.isAnimating = true;
         this.clearHighlights();
         const oldLogPos = this.logic.pieces[color][index];
         const result = this.logic.movePiece(index);
@@ -1038,6 +1084,7 @@ export class GameScene extends Phaser.Scene {
 
                     // Delay next turn to let ghost effect play out
                     this.time.delayedCall(800, () => {
+                        this.isAnimating = false;
                         this.updateAllPiecePositions(false);
                         
                         // Check for victory
@@ -1057,6 +1104,7 @@ export class GameScene extends Phaser.Scene {
                         }
                     });
                 } else {
+                    this.isAnimating = false;
                     this.updateAllPiecePositions(false);
 
                     // Check for victory
@@ -1076,6 +1124,8 @@ export class GameScene extends Phaser.Scene {
                     }
                 }
             });
+        } else {
+            this.isAnimating = false;
         }
     }
 
@@ -1193,9 +1243,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     checkAITurn() {
-        if (this.aiPlayers.includes(this.logic.turn)) {
-            this.rollButtonArea.disableInteractive();
+        const currentTurn = this.logic.turn;
+        if (this.aiPlayers.includes(currentTurn)) {
+            // Disable the human player's dice while AI is playing
+            const humanColor = this.activePlayers.find(c => !this.aiPlayers.includes(c));
+            if (humanColor && this.diceContainers[humanColor]) {
+                this.diceContainers[humanColor].disableInteractive();
+            }
             this.time.delayedCall(1000, () => {
+                // Safety: verify it's still this AI's turn
+                if (this.logic.turn !== currentTurn) return;
                 const value = this.logic.rollDice();
                 if (value) {
                     this.processRoll(value);
@@ -1207,7 +1264,8 @@ export class GameScene extends Phaser.Scene {
                 }
             });
         } else {
-            this.rollButtonArea.setInteractive();
+            // Re-enable the human player's dice
+            if (this.rollButtonArea) this.rollButtonArea.setInteractive();
         }
     }
 
