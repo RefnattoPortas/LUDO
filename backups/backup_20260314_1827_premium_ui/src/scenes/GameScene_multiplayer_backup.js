@@ -3,7 +3,6 @@ import { COLORS, DARK_COLORS, BOARD_CONFIG } from '../constants';
 import { LudoLogic } from '../logic/LudoLogic';
 import { getCoordinates } from '../logic/PathMapping';
 import { LudoAI } from '../logic/LudoAI';
-import { LudoOnline } from '../logic/LudoOnline';
 
 export class GameScene extends Phaser.Scene {
     constructor() {
@@ -14,8 +13,6 @@ export class GameScene extends Phaser.Scene {
         this.mode = data?.mode || 'IA';
         this.playerColor = data?.playerColor || 'RED';
         this.activePlayers = data?.activePlayers;
-        this.roomId = data?.roomId;
-        this.turnDuration = 7000; // 7 seconds
         
         // Safety fallback if data is missing or corrupted
         if (!Array.isArray(this.activePlayers) || this.activePlayers.length === 0) {
@@ -34,19 +31,13 @@ export class GameScene extends Phaser.Scene {
         const cy = H / 2;
         
         // Background
-        const bg = this.add.image(cx, cy, 'game_bg').setDepth(-2);
+        const bg = this.add.image(cx, cy, 'game_bg');
         const scaleX = W / bg.width;
         const scaleY = H / bg.height;
         bg.setScale(Math.max(scaleX, scaleY) || 1);
         
         // Dark overlay so the main playing board stands out clearly
-        this.add.rectangle(0, 0, W, H, 0x000000, 0.3).setOrigin(0).setDepth(-1);
-
-        // Validar activePlayers
-        const validColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
-        if (!Array.isArray(this.activePlayers)) this.activePlayers = validColors;
-        this.activePlayers = this.activePlayers.filter(c => validColors.includes(c));
-        if (this.activePlayers.length === 0) this.activePlayers = validColors;
+        this.add.rectangle(0, 0, W, H, 0x000000, 0.3).setOrigin(0);
 
         this.logic = new LudoLogic(this.activePlayers);
         this.ai = new LudoAI(this.logic);
@@ -89,7 +80,6 @@ export class GameScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true })
         .setDepth(100) // Ensure it's above board elements
         .on('pointerdown', () => {
-            if (this.online) this.online.leaveRoom(this.playerColor);
             this.scene.start('MenuScene');
         });
 
@@ -101,114 +91,12 @@ export class GameScene extends Phaser.Scene {
             dot.generateTexture('particle_dot', 8, 8);
         }
 
-        if (this.mode === 'ONLINE' && this.roomId) {
-            this.online = new LudoOnline(this.roomId, (state) => this.onOnlineUpdate(state));
-            this.online.joinRoom(this.playerColor);
-        } else {
-            this.checkAITurn();
-        }
-
-        this.startTurnTimer();
-    }
-
-    startTurnTimer() {
-        if (this.turnTimer) this.turnTimer.remove();
-        this.timeLeft = 7;
-        
-        const turnColor = this.logic.turn;
-        const isAI = this.aiPlayers.includes(turnColor);
-        // Only show if it's a local human or it's my turn online
-        const isMyAction = !isAI && (this.mode !== 'ONLINE' || turnColor === this.playerColor);
-
-        if (this.timerLabel) {
-            this.timerLabel.setText('7');
-            this.timerLabel.setVisible(isMyAction);
-            this.timerLabel.setScale(this.mainScale);
-        }
-
-        this.turnTimer = this.time.addEvent({
-            delay: 1000,
-            repeat: 6,
-            callback: () => {
-                this.timeLeft--;
-                this.updateStatusText();
-                if (this.timerLabel.visible) {
-                    this.timerLabel.setScale(this.mainScale * 1.3);
-                    this.tweens.add({
-                        targets: this.timerLabel,
-                        scale: this.mainScale,
-                        duration: 300,
-                        ease: 'Back.easeOut'
-                    });
-                }
-                if (this.timeLeft <= 0) {
-                    this.handleTimeout();
-                }
-            }
-        });
-    }
-
-    handleTimeout() {
-        // Only trigger timeout if it's a human turn (Local or my turn Online)
-        if (this.mode === 'ONLINE' && this.logic.turn !== this.playerColor) return;
-        if (this.aiPlayers.includes(this.logic.turn)) return;
-
-        this.showTemporaryMessage(this.logic.turn, 'Tempo Esgotado!');
-        this.clearHighlights();
-        this.resetDice();
-        
-        this.goToNextTurn();
-    }
-
-    goToNextTurn() {
-        // 1 second delay between turns
-        this.time.delayedCall(1000, () => {
-            this.logic.nextTurn();
-            
-            if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
-            }
-            
-            this.updateStatusText();
-            this.startTurnTimer();
-            this.checkAITurn();
-        });
-    }
-
-    onOnlineUpdate(state) {
-        if (!state) return;
-        
-        const isDifferentTurn = state.current_turn !== this.logic.turn;
-        const isDifferentDice = state.last_dice_roll !== this.logic.diceRoll;
-        const isDifferentPieces = JSON.stringify(state.pieces) !== JSON.stringify(this.logic.pieces);
-
-        if (isDifferentTurn || isDifferentDice || isDifferentPieces) {
-            this.logic.turn = state.current_turn;
-            this.logic.diceRoll = state.last_dice_roll;
-            this.logic.pieces = state.pieces;
-            
-            this.updateAllPiecePositions(true);
-            
-            if (this.logic.diceRoll === 0) {
-                this.logic.gameState = 'WAITING_FOR_ROLL';
-                this.resetDice();
-            } else {
-                this.logic.gameState = 'WAITING_FOR_MOVE';
-                // Only animate if it's NOT our own roll (we already animated locally)
-                if (state.current_turn !== this.playerColor) {
-                    this.animateDice(this.logic.diceRoll);
-                }
-            }
-            
-            this.updateStatusText();
-            this.startTurnTimer();
-            this.checkAITurn(); 
-        }
+        this.checkAITurn();
     }
 
     drawBoard() {
         const { CELL_SIZE } = BOARD_CONFIG;
-        const graphics = this.add.graphics().setDepth(0);
+        const graphics = this.add.graphics();
         graphics.setPosition(this.boardX, this.boardY);
         graphics.setScale(this.mainScale);
 
@@ -252,11 +140,11 @@ export class GameScene extends Phaser.Scene {
                 graphics.fillStyle(fillCol, 1);
                 graphics.fillRoundedRect(cx, cy, cw, cw, 8);
                 
-                // Border light - Darker for white cells
-                const borderAlpha = fillCol === 0xffffff ? 0.6 : 0.4;
-                const borderCol = fillCol === 0xffffff ? 0x000000 : 0x222222;
-                graphics.lineStyle(1, borderCol, borderAlpha); 
-                graphics.strokeRoundedRect(cx, cy, cw, cw, 6);
+                // Border light - Darker for white cells as requested
+                const borderAlpha = fillCol === 0xffffff ? 0.8 : 0.5;
+                const borderCol = fillCol === 0xffffff ? 0x000000 : 0x444444;
+                graphics.lineStyle(2, borderCol, borderAlpha);
+                graphics.strokeRoundedRect(cx, cy, cw, cw, 8);
 
                 // Arrows for entry
                 if (x === 7 && y === 14) this.drawArrow(graphics, cx + cw/2, cy + cw/2, 'UP', COLORS.RED);
@@ -402,129 +290,69 @@ export class GameScene extends Phaser.Scene {
 
 
     createDiceUI() {
-        const boardSize = 600 * this.mainScale;
-        const vPad = 55 * this.mainScale; // Vertical padding (outside top/bottom)
-        const hOffset = 38 * this.mainScale; // Horizontal offset from board edge
+        const diceX = this.cameras.main.centerX;
+        const diceY = this.diceY;
+        this.diceShadow = this.add.ellipse(diceX, diceY + (25 * this.mainScale), 50 * this.mainScale, 15 * this.mainScale, 0x000000, 0.5);
         
-        // Positions aligned with board horizontal limits
-        this.dicePositions = {
-            RED:    { x: this.boardX + hOffset,             y: this.boardY + boardSize + vPad },
-            BLUE:   { x: this.boardX + hOffset,             y: this.boardY - vPad },
-            YELLOW: { x: this.boardX + boardSize - hOffset, y: this.boardY - vPad },
-            GREEN:  { x: this.boardX + boardSize - hOffset, y: this.boardY + boardSize + vPad }
-        };
+        this.rollButtonContainer = this.add.container(diceX, diceY);
+        this.rollButtonContainer.setScale(this.mainScale);
+        
+        const diceBg = this.add.graphics();
+        diceBg.fillStyle(0xffffff, 1);
+        diceBg.fillRoundedRect(-30, -30, 60, 60, 12);
+        diceBg.lineStyle(3, 0xdddddd, 1);
+        diceBg.strokeRoundedRect(-30, -30, 60, 60, 12);
+        
+        // Inner depth for 3D feel
+        diceBg.fillStyle(0xcccccc, 1);
+        diceBg.fillRoundedRect(25, -24, 6, 54, 4);
+        diceBg.fillRoundedRect(-24, 25, 54, 6, 4);
 
-        // UI Label Offsets (relative to Dice Center)
-        this.timerOffsets = {
-            RED:    { x: 50 * this.mainScale,  y: 0, align: 'left' },
-            BLUE:   { x: 50 * this.mainScale,  y: 0, align: 'left' },
-            YELLOW: { x: -50 * this.mainScale, y: 0, align: 'right' },
-            GREEN:  { x: -50 * this.mainScale, y: 0, align: 'right' }
-        };
+        this.diceText = this.add.text(0, 0, 'GIRAR', { fontSize: '15px', fill: '#000', fontWeight: 'bold' }).setOrigin(0.5);
+        
+        // Dice focus highlight (The "porda do dinho" flashing)
+        this.diceHighlight = this.add.graphics();
+        this.diceHighlight.lineStyle(4, 0xffff00, 1);
+        this.diceHighlight.strokeRoundedRect(-32, -32, 64, 64, 14);
+        this.diceHighlight.setVisible(false);
 
-        this.diceUI = {};
-
-        ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
-            const pos = this.dicePositions[color];
-            const container = this.add.container(pos.x, pos.y).setDepth(20);
-            container.setScale(this.mainScale);
-            
-            // Dice Shadow
-            const shadow = this.add.ellipse(0, 25, 50, 15, 0x000000, 0.3);
-            
-            const diceBg = this.add.graphics();
-            diceBg.fillStyle(0xffffff, 1);
-            diceBg.fillRoundedRect(-30, -30, 60, 60, 12);
-            diceBg.lineStyle(4, 0xdddddd, 1); // Changed from 2px to 4px
-            diceBg.strokeRoundedRect(-30, -30, 60, 60, 12);
-            
-            // Inner depth
-            diceBg.fillStyle(0xeeeeee, 1);
-            diceBg.fillRoundedRect(22, -24, 6, 50, 4);
-            diceBg.fillRoundedRect(-24, 22, 50, 6, 4);
-
-            const diceText = this.add.text(0, 0, 'GIRAR', { 
-                fontSize: '12px', fill: '#888', fontWeight: 'bold' 
-            }).setOrigin(0.5);
-
-            // Dice border highlight - Thinner and pulsates rapidly (Removed padding)
-            const highlight = this.add.graphics();
-            highlight.lineStyle(6, COLORS[color], 1); // Thicker line
-            highlight.strokeRoundedRect(-30, -30, 60, 60, 12);
-            
-            // Add a subtle bloom effect if possible by layering
-            const glow = this.add.graphics();
-            glow.fillStyle(COLORS[color], 0.3);
-            glow.fillRoundedRect(-34, -34, 68, 68, 16);
-            glow.setName('glow');
-            glow.setVisible(false);
-            
-            highlight.setVisible(false);
-            highlight.setName('highlight');
-
-            const face = this.add.graphics();
-            
-            container.add([shadow, diceBg, glow, highlight, diceText, face]);
-            
-            const hitArea = new Phaser.Geom.Rectangle(-30, -30, 60, 60);
-            container.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
-            
-            container.on('pointerdown', () => this.handleRoll());
-
-            this.diceUI[color] = { container, diceText, face, highlight, shadow };
-        });
-
-        // Board Border Graphic
-        this.boardBorder = this.add.graphics().setDepth(5);
-        this.boardBorder.setPosition(this.boardX, this.boardY);
-
-        // UI Container for Timer + Status
-        this.statusContainer = this.add.container(0, 0).setDepth(100);
-
-        this.statusTextLabel = this.add.text(0, 0, 'GIRAR', {
-            fontSize: `${18 * this.mainScale}px`,
-            fontFamily: 'Arial Black',
-            fill: '#ffffff',
-            stroke: '#000',
-            strokeThickness: 3
-        }).setOrigin(0.5);
-
-        this.timerLabel = this.add.text(0, 0, '07', {
-            fontSize: `${36 * this.mainScale}px`,
-            fontFamily: 'Arial Black',
-            fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 5
-        }).setOrigin(0.5);
-
-        this.statusContainer.add([this.statusTextLabel, this.timerLabel]);
-        this.statusContainer.setVisible(false);
+        this.diceFace = this.add.graphics();
+        
+        this.rollButtonContainer.add([diceBg, this.diceHighlight, this.diceText, this.diceFace]);
+        
+        const hitArea = new Phaser.Geom.Rectangle(-30, -30, 60, 60);
+        this.rollButtonContainer.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+        this.rollButtonArea = this.rollButtonContainer; 
+        this.rollButtonContainer.on('pointerdown', () => this.handleRoll());
     }
 
     resetDice() {
-        ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
-            const ui = this.diceUI[color];
-            ui.diceText.setText('GIRAR').setVisible(true);
-            ui.face.clear();
-            ui.container.angle = 0;
-            ui.container.setScale(this.mainScale);
-            ui.shadow.setScale(1);
-            ui.shadow.setAlpha(0.3);
-            ui.highlight.setVisible(false);
-            this.tweens.killTweensOf(ui.highlight);
-        });
+        this.diceText.setFontSize('15px');
+        this.diceText.setText('GIRAR');
+        this.diceText.setVisible(true);
+        if (this.diceFace) this.diceFace.clear();
+        if (this.rollButtonContainer) {
+            this.rollButtonContainer.angle = 0;
+            this.rollButtonContainer.setScale(this.mainScale);
+            this.rollButtonContainer.y = this.diceY;
+            if (this.diceShadow) {
+                this.diceShadow.setScale(1);
+                this.diceShadow.setAlpha(0.5);
+            }
+        }
+        if (this.diceHighlight) {
+            this.diceHighlight.setVisible(false);
+            this.tweens.killTweensOf(this.diceHighlight);
+        }
     }
 
-    drawDiceFace(value, color = null) {
-        const turnColor = color || this.logic.turn;
-        const ui = this.diceUI[turnColor];
-        
-        ui.face.clear();
-        ui.diceText.setVisible(value === 0);
+    drawDiceFace(value) {
+        this.diceFace.clear();
+        this.diceText.setVisible(value === 0);
         
         if (value === 0) return;
         
-        ui.face.fillStyle(0x222222, 1);
+        this.diceFace.fillStyle(0x222222, 1);
         const positions = [];
         
         if (value === 1 || value === 3 || value === 5) positions.push({x:0, y:0});
@@ -532,21 +360,14 @@ export class GameScene extends Phaser.Scene {
         if (value > 3) { positions.push({x:14, y:-14}); positions.push({x:-14, y:14}); }
         if (value === 6) { positions.push({x:-14, y:0}); positions.push({x:14, y:0}); }
         
-        positions.forEach(p => ui.face.fillCircle(p.x, p.y, 6));
+        positions.forEach(p => this.diceFace.fillCircle(p.x, p.y, 6));
     }
 
     handleRoll() {
-        if (this.mode === 'ONLINE') {
-            if (this.logic.turn !== this.playerColor || this.logic.gameState !== 'WAITING_FOR_ROLL') return;
-        } else if (this.aiPlayers.includes(this.logic.turn) || this.logic.gameState !== 'WAITING_FOR_ROLL') {
-            return;
-        }
+        if (this.aiPlayers.includes(this.logic.turn) || this.logic.gameState !== 'WAITING_FOR_ROLL') return;
 
         const value = this.logic.rollDice();
         if (value) {
-            if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, value, this.logic.pieces);
-            }
             this.processRoll(value);
         }
     }
@@ -562,7 +383,9 @@ export class GameScene extends Phaser.Scene {
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
-                    this.goToNextTurn();
+                    this.logic.nextTurn();
+                    this.updateStatusText();
+                    this.checkAITurn();
                 });
                 return;
             }
@@ -572,7 +395,9 @@ export class GameScene extends Phaser.Scene {
                 this.time.delayedCall(1500, () => {
                     this.clearHighlights();
                     this.resetDice();
-                    this.goToNextTurn();
+                    this.logic.nextTurn();
+                    this.updateStatusText();
+                    this.checkAITurn();
                 });
                 return;
             }
@@ -586,54 +411,53 @@ export class GameScene extends Phaser.Scene {
     }
 
     animateDice(value) {
-        const color = this.logic.turn;
-        const ui = this.diceUI[color];
-        
-        ui.diceText.setVisible(false);
-        ui.face.clear();
+        this.diceText.setVisible(false);
+        this.diceFace.clear();
 
-        // 1. Subtle jump and single spin
+        // 1. Subtle jump and single spin (height reduced by 60%)
         this.tweens.add({
-            targets: ui.container,
-            y: this.dicePositions[color].y - (15 * this.mainScale), 
-            scaleX: this.mainScale * 1.1, // Increased scale for more vibrancy
-            scaleY: this.mainScale * 1.1, // Increased scale for more vibrancy
-            angle: 360, 
-            duration: 300, // Faster pulse
+            targets: this.rollButtonContainer,
+            y: this.diceY - (10 * this.mainScale), // Jump height reduced
+            scaleX: 1.05,
+            scaleY: 1.05,
+            angle: 360, // 1 full rotation
+            duration: 400,
             yoyo: true,
             ease: 'Sine.easeOut'
         });
 
-        // 2. Shrink shadow
+        // 2. Shrink shadow accordingly
         this.tweens.add({
-            targets: ui.shadow,
+            targets: this.diceShadow,
             scaleX: 0.6,
             scaleY: 0.6,
-            alpha: 0.1,
-            duration: 300, // Faster pulse
+            alpha: 0.3,
+            duration: 400,
             yoyo: true,
             ease: 'Sine.easeOut'
         });
 
-        // 3. Rapidly change faces
+        // 3. Rapidly change faces while jumping
         let rollVal = 1;
         const rollTimer = this.time.addEvent({
-            delay: 30, // Faster face changes
+            delay: 50,
             callback: () => {
                 rollVal = (rollVal % 6) + 1;
-                this.drawDiceFace(rollVal, color);
+                this.drawDiceFace(rollVal);
             },
             loop: true
         });
 
+        // 4. Stop much sooner to fit the 400ms duration (total 800ms with yoyo)
         this.time.delayedCall(800, () => {
             rollTimer.remove();
-            ui.container.angle = 0;
-            this.drawDiceFace(value, color);
+            this.rollButtonContainer.angle = 0; // ensure straight
+            this.drawDiceFace(value);
             
+            // tiny bounce on landing
             this.tweens.add({
-                targets: ui.container,
-                y: this.dicePositions[color].y + (3 * this.mainScale),
+                targets: this.rollButtonContainer,
+                y: this.diceY + (3 * this.mainScale),
                 duration: 60,
                 yoyo: true,
                 ease: 'Sine.easeInOut'
@@ -664,7 +488,7 @@ export class GameScene extends Phaser.Scene {
                 
                 // Highlight Glow
                 const glow = this.add.circle(0, 0, 20, 0xffffff, 0);
-                glow.setStrokeStyle(4, 0xffffff);
+                glow.setStrokeStyle(4, 0xffff00);
                 glow.setName('glow');
                 
                 // Drop shadow
@@ -701,7 +525,6 @@ export class GameScene extends Phaser.Scene {
                 const badgeTx = this.add.text(10, -18, '2', { fontSize: '11px', fill: '#fff' }).setOrigin(0.5).setName('badgeTx').setVisible(false);
 
                 container.add([glow, shadow, body, highlight, badgeBg, badgeTx]);
-                container.setDepth(10);
                 container.setInteractive(new Phaser.Geom.Circle(0, 0, 15), Phaser.Geom.Circle.Contains);
                 container.on('pointerdown', () => this.handlePieceClick(color, i));
                 
@@ -746,9 +569,6 @@ export class GameScene extends Phaser.Scene {
     }
 
     handlePieceClick(color, index) {
-        if (this.mode === 'ONLINE') {
-            if (this.logic.turn !== this.playerColor || this.logic.turn !== color) return;
-        }
         if (this.aiPlayers.includes(this.logic.turn)) return;
         if (this.logic.turn !== color || this.logic.gameState !== 'WAITING_FOR_MOVE') return;
         if (!this.logic.canMovePiece(index)) return;
@@ -762,16 +582,13 @@ export class GameScene extends Phaser.Scene {
         const result = this.logic.movePiece(index);
         
         if (result && result.success) {
-            if (this.mode === 'ONLINE') {
-                this.online.updateGame(this.logic.turn, this.logic.diceRoll, this.logic.pieces);
-            }
             // Restore overlapping pieces to default position before animating
             this.updateAllPiecePositions(true, color, index);
 
             this.animatePath(color, index, result.oldPos, result.newPos, () => {
                 if (result.captured && result.captured.length > 0) {
                     this.cameras.main.shake(150, 0.015);
-
+                    
                     result.captured.forEach(cap => {
                         const capSprite = this.pieceSprites[cap.color][cap.index];
                         // Ghost effect starts NOW (attacker just arrived at the same cell)
@@ -797,7 +614,8 @@ export class GameScene extends Phaser.Scene {
                     // Delay next turn to let ghost effect play out
                     this.time.delayedCall(700, () => {
                         this.updateAllPiecePositions(false);
-                        
+                        this.updateStatusText();
+
                         // Check for victory
                         const winner = this.logic.checkWinner();
                         if (winner) {
@@ -805,22 +623,16 @@ export class GameScene extends Phaser.Scene {
                             return;
                         }
 
-                        if (result.shouldNextTurn) {
-                            this.goToNextTurn();
-                        } else {
-                            this.resetDice();
-                            this.updateStatusText();
-                            this.startTurnTimer();
+                        this.time.delayedCall(100, () => {
+                            if (this.logic.gameState === 'WAITING_FOR_ROLL') this.resetDice();
                             this.checkAITurn();
-                            // Sync extra turn roll state
-                            if (this.mode === 'ONLINE') {
-                                this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
-                            }
-                        }
+                        });
                     });
                 } else {
+                    // No capture — proceed immediately
                     this.updateAllPiecePositions(false);
-
+                    this.updateStatusText();
+                    
                     // Check for victory
                     const winner = this.logic.checkWinner();
                     if (winner) {
@@ -828,74 +640,54 @@ export class GameScene extends Phaser.Scene {
                         return;
                     }
 
-                    if (result.shouldNextTurn) {
-                        this.goToNextTurn();
-                    } else {
-                        this.resetDice();
-                        this.updateStatusText();
-                        this.startTurnTimer();
+                    this.time.delayedCall(100, () => {
+                        if (this.logic.gameState === 'WAITING_FOR_ROLL') this.resetDice();
                         this.checkAITurn();
-                        // Sync extra turn roll state
-                        if (this.mode === 'ONLINE') {
-                            this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
-                        }
-                    }
+                    });
                 }
             });
         }
     }
+
     handleVictory(winner) {
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
-        const boardSize = 600 * this.mainScale;
-        const winColor = this.getColorHex(winner);
         const colorNameMap = { RED: 'VERMELHO', BLUE: 'AZUL', YELLOW: 'AMARELO', GREEN: 'VERDE' };
         
-        // Victory Panel (Board Width)
-        const panel = this.add.graphics();
-        panel.fillStyle(winColor, 0.9);
-        panel.fillRect(cx - boardSize/2, cy - 80, boardSize, 160);
-        panel.lineStyle(4, 0xffffff, 1);
-        panel.strokeRect(cx - boardSize/2, cy - 80, boardSize, 160);
-        panel.setDepth(500).setAlpha(0);
-
         // Victory Text
-        const vicText = this.add.text(cx, cy, `VITÓRIA DO JOGADOR ${colorNameMap[winner]}!`, {
-            fontSize: `${36 * this.mainScale}px`,
+        const vicText = this.add.text(cx, cy, `VITÓRIA DO\nJOGADOR ${colorNameMap[winner]}!`, {
+            fontSize: '64px',
             fontFamily: 'Arial Black',
-            fill: '#ffffff',
-            stroke: '#000000',
-            strokeThickness: 6,
+            fill: '#fff',
+            stroke: '#000',
+            strokeThickness: 8,
             align: 'center'
-        }).setOrigin(0.5).setDepth(501).setAlpha(0);
+        }).setOrigin(0.5).setScale(0).setDepth(200);
 
-        // Animation sequence
-        this.tweens.add({
-            targets: [panel, vicText],
-            alpha: 1,
-            duration: 500,
-            ease: 'Power2'
-        });
-
-        // Confetti effect
+        // Confetti effect (simple particles)
         const emitter = this.add.particles(0, 0, 'particle_dot', {
-            x: { min: cx - boardSize/2, max: cx + boardSize/2 },
-            y: cy - 100,
+            x: { min: 0, max: this.cameras.main.width },
+            y: -20,
             lifespan: 2000,
             speedY: { min: 200, max: 400 },
             scale: { start: 0.1, end: 0 },
             alpha: { start: 1, end: 0 },
-            tint: [0xffffff, winColor],
+            tint: [0xff0000, 0x00ff00, 0x0000ff, 0xffff00],
             frequency: 50,
-            gravityY: 100,
-            depth: 502
+            blendMode: 'ADD'
         });
 
-        this.time.delayedCall(5000, () => {
-            if (this.mode === 'ONLINE') {
-                this.online.leaveRoom(this.playerColor);
+        this.tweens.add({
+            targets: vicText,
+            scale: 1,
+            angle: 360,
+            duration: 1000,
+            ease: 'Back.easeOut',
+            onComplete: () => {
+                this.time.delayedCall(3000, () => {
+                    this.scene.start('MenuScene');
+                });
             }
-            this.scene.start('MenuScene');
         });
     }
 
@@ -936,38 +728,21 @@ export class GameScene extends Phaser.Scene {
     }
 
     checkAITurn() {
-        const turnColor = this.logic.turn;
-        const isAI = this.aiPlayers.includes(turnColor);
-
-        // Disable all dice first
-        ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
-            this.diceUI[color].container.disableInteractive();
-        });
-
-        if (isAI) {
+        if (this.aiPlayers.includes(this.logic.turn)) {
+            this.rollButtonArea.disableInteractive();
             this.time.delayedCall(1000, () => {
                 const value = this.logic.rollDice();
                 if (value) {
                     this.processRoll(value);
                 } else {
+                    // Logic auto-skipped if no moves
                     this.resetDice();
                     this.updateStatusText();
                     this.checkAITurn();
                 }
             });
         } else {
-            // Online: Only enable if it's actually our turn color
-            // Local: Always enable for human turns
-            const isMyGlobalTurn = (this.mode !== 'ONLINE' || turnColor === this.playerColor);
-            
-            if (isMyGlobalTurn) {
-                this.diceUI[turnColor].container.setInteractive();
-            } else {
-                // Ensure other dice are not interactive
-                ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
-                    this.diceUI[color].container.disableInteractive();
-                });
-            }
+            this.rollButtonArea.setInteractive();
         }
     }
 
@@ -1078,105 +853,76 @@ export class GameScene extends Phaser.Scene {
     }
 
     showTemporaryMessage(color, text) {
-        if (!this.statusTextLabel) return;
-        
-        // Use the existing label for "Sem jogadas", etc.
-        const originalText = this.statusTextLabel.text;
-        this.statusTextLabel.setText(text.replace('\n', ' ')).setScale(1.5).setFill('#ffff00');
-        
-        this.tweens.add({
-            targets: this.statusTextLabel,
-            scale: 1,
-            duration: 400,
-            ease: 'Back.easeOut',
-            onComplete: () => {
-                this.time.delayedCall(1500, () => {
-                    if (this.statusTextLabel) {
-                        this.statusTextLabel.setText(originalText).setFill('#ffffff');
-                    }
-                });
-            }
-        });
+        if (this.statusLabel) {
+            this.statusLabel.setText(text);
+            this.statusLabel.setVisible(true);
+            const colorHex = this.getColorHex(color, true);
+            this.statusLabel.setBackgroundColor(colorHex);
+            
+            this.tweens.add({
+                targets: this.statusLabel,
+                scale: this.mainScale * 1.2,
+                duration: 250,
+                yoyo: true,
+                ease: 'Back.easeOut'
+            });
+        }
     }
 
     updateStatusText() {
-        const turnColor = this.logic.turn;
-        if (!this.diceUI) return;
-        const ui = this.diceUI[turnColor];
-        if (!ui) return;
+        const cx = this.cameras.main.centerX;
+        const sX = cx - (160 * this.mainScale); // Positioned to the left of the dice
+        const sY = this.diceY;
 
-        // 1. Reset all dice UI state
-        ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
-            const d = this.diceUI[color];
-            d.highlight.setVisible(false);
-            this.tweens.killTweensOf(d.highlight);
-            d.container.setAlpha(0.5); 
-        });
+        if (!this.statusLabel) {
+            this.statusLabel = this.add.text(sX, sY, '', {
+                fontSize: '18px',
+                fontFamily: 'Arial Black, Arial, sans-serif',
+                fill: '#fff',
+                fontWeight: 'bold',
+                align: 'center',
+                padding: { x: 15, y: 10 },
+                shadow: { color: '#000', fill: true, offsetX: 2, offsetY: 2, blur: 6 }
+            }).setOrigin(0.5).setDepth(30).setAlpha(0.9);
 
-        // 2. Activate current turn's die
-        ui.highlight.setVisible(true);
-        ui.container.setAlpha(1);
-
-        // Thinner but MUCH more vibrant pulsing (Glow + Highlight)
-        ui.highlight.setVisible(true);
-        const glow = ui.container.getByName('glow');
-        if (glow) glow.setVisible(true);
-
-        this.tweens.add({
-            targets: [ui.highlight, glow],
-            alpha: { from: 1, to: 0.4 },
-            scale: { from: 1, to: 1.15 },
-            duration: 500,
-            yoyo: true,
-            repeat: -1
-        });
-
-        // 3. Update Board Border
-        this.boardBorder.clear();
-        const boardSize = 15 * BOARD_CONFIG.CELL_SIZE * this.mainScale;
-        this.boardBorder.lineStyle(4, COLORS[turnColor], 1);
-        this.boardBorder.strokeRoundedRect(-2, -2, boardSize + 4, boardSize + 4, 16);
-
-        // 4. Update Timer & Status Label Position
-        const offset = this.timerOffsets[turnColor];
-        const baseX = ui.container.x + offset.x;
-        const baseY = ui.container.y + offset.y;
-
-        const isAI = this.aiPlayers.includes(turnColor);
-        const isMyTurn = (this.mode !== 'ONLINE' || turnColor === this.playerColor);
-
-        const stateMsg = this.logic.gameState === 'WAITING_FOR_ROLL' ? 'GIRAR' : 'MOVER';
-        
-        // Only update text if showTemporaryMessage is not acting
-        if (!this.tweens.isTweening(this.statusTextLabel)) {
-            this.statusTextLabel.setText(stateMsg).setFill('#ffffff');
+            // Pulse animation for the turn indicator
+            this.tweens.add({
+                targets: this.statusLabel,
+                scale: this.mainScale * 1.08,
+                duration: 500,
+                yoyo: true,
+                repeat: -1,
+                ease: 'Sine.easeInOut'
+            });
         }
-        
-        this.timerLabel.setText(Math.max(0, this.timeLeft || 0).toString().padStart(2, '0'));
 
-        if (offset.align === 'left') {
-            // RED/BLUE: Dado -> Timer -> Texto
-            this.timerLabel.setOrigin(0, 0.5).setPosition(baseX, baseY);
-            this.statusTextLabel.setOrigin(0, 0.5).setPosition(baseX + 55 * this.mainScale, baseY);
+        const color = this.logic.turn;
+        const colorNameMap = { RED: 'VERMELHO', BLUE: 'AZUL', YELLOW: 'AMARELO', GREEN: 'VERDE' };
+        const colorHex = this.getColorHex(color, true);
+        
+        const stateMsg = this.logic.gameState === 'WAITING_FOR_ROLL' ? 'GIRE O DADO' : 'MOVA A PEÇA';
+        const fullMsg = `VEZ DO ${colorNameMap[color]}\n${stateMsg}`;
+        
+        this.statusLabel.setText(fullMsg);
+        this.statusLabel.setBackgroundColor(colorHex);
+        this.statusLabel.setVisible(true);
+        this.statusLabel.setScale(this.mainScale);
+
+        // Flashing dice logic
+        if (this.logic.gameState === 'WAITING_FOR_ROLL' && !this.aiPlayers.includes(this.logic.turn)) {
+            this.diceHighlight.setVisible(true);
+            this.tweens.killTweensOf(this.diceHighlight);
+            this.tweens.add({
+                targets: this.diceHighlight,
+                alpha: 0,
+                duration: 500,
+                yoyo: true,
+                repeat: -1
+            });
         } else {
-            // YELLOW/GREEN: Texto -> Timer -> Dado
-            this.timerLabel.setOrigin(1, 0.5).setPosition(baseX, baseY);
-            this.statusTextLabel.setOrigin(1, 0.5).setPosition(baseX - 55 * this.mainScale, baseY);
+            this.diceHighlight.setVisible(false);
+            this.tweens.killTweensOf(this.diceHighlight);
         }
-
-        this.statusContainer.setVisible(isMyTurn);
-    }
-
-    goToNextTurn() {
-        this.logic.nextTurn();
-        if (this.mode === 'ONLINE') {
-            // Sync with DB: dice = 0 signals turn start
-            this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
-        }
-        this.startTurnTimer();
-        this.updateStatusText();
-        this.resetDice();
-        this.checkAITurn();
     }
 
     getColorHex(color, returnString = false) {
@@ -1185,4 +931,3 @@ export class GameScene extends Phaser.Scene {
         return returnString ? strings[color] : hexes[color];
     }
 }
-

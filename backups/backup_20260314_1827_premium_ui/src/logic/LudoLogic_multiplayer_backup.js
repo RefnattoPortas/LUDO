@@ -57,9 +57,10 @@ export class LudoLogic {
         const newPos = this.pieces[this.turn][pieceIndex];
         const captureInfo = this.checkCaptures(this.turn, newPos, true);
         const getsExtraTurn = (this.diceRoll === 6 || captureInfo.length > 0 || newPos === 57);
-        const shouldNextTurn = !getsExtraTurn;
 
-        if (getsExtraTurn) {
+        if (!getsExtraTurn) {
+            this.nextTurn();
+        } else {
             this.gameState = 'WAITING_FOR_ROLL';
         }
 
@@ -67,7 +68,6 @@ export class LudoLogic {
             success: true,
             captured: captureInfo,
             extraTurn: getsExtraTurn,
-            shouldNextTurn: shouldNextTurn,
             oldPos: oldPos,
             newPos: newPos
         };
