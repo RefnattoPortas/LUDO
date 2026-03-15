@@ -18,6 +18,7 @@ export class LobbyScene extends Phaser.Scene {
 
         this.joinedRoom = null;
         this.myColor = null;
+        this.isStarting = false;
 
         // Background
         const bg = this.add.image(cx, cy, 'lobby_bg').setDepth(-2);
@@ -238,24 +239,49 @@ export class LobbyScene extends Phaser.Scene {
             .subscribe();
 
         this.onPlayerUpdate();
+
+        // FALLBACK: Reinforcement timer to check players every 2 seconds if Realtime fails
+        if (this.fallbackTimer) this.fallbackTimer.remove();
+        this.fallbackTimer = this.time.addEvent({
+            delay: 2500,
+            callback: () => this.onPlayerUpdate(),
+            loop: true
+        });
     }
 
     async onPlayerUpdate() {
         if (!this.sys || !this.sys.isActive()) return;
-        if (!this.joinedRoom) return;
+        if (!this.joinedRoom || this.isStarting) return;
 
-        // Check current room players
+        // Check current room status and players
+        const { data: roomData } = await supabase
+            .from('ludo_rooms')
+            .select('status, max_players')
+            .eq('id', this.joinedRoom.id)
+            .single();
+
         const { data: players } = await supabase
             .from('ludo_players')
             .select('color')
             .eq('room_id', this.joinedRoom.id);
         
-        const count = players?.length || 0;
+        if (!roomData || !players) return;
+
+        const count = players.length;
+        const max = roomData.max_players;
+
         if (this.waitingStatus) {
-            this.waitingStatus.setText(`Jogadores: ${count}/${this.joinedRoom.max_players}`);
+            this.waitingStatus.setText(`Jogadores: ${count}/${max}`);
+        }
+        if (this.waitingRoomInfo) {
+            this.waitingRoomInfo.setText(`ID da Sala: ${this.joinedRoom.id}`);
         }
 
-        if (count >= this.joinedRoom.max_players) {
+        // If room is full OR already in progress, start locally
+        if (count >= max || roomData.status === 'EM JOGO') {
+            this.isStarting = true;
+            console.log(`[Lobby] Room ${this.joinedRoom.id} is ready. Count: ${count}/${max}, Status: ${roomData.status}`);
+            
             if (this.waitingTitle) this.waitingTitle.setText('SALA CHEIA!');
             if (this.waitingStatus) this.waitingStatus.setText('Iniciando partida...');
             
@@ -263,10 +289,12 @@ export class LobbyScene extends Phaser.Scene {
             const colors = players.map(p => p.color);
             const orderedColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'].filter(c => colors.includes(c));
             
-            // Optional: Update room status so no more people try to join
-            await supabase.from('ludo_rooms').update({ status: 'EM JOGO' }).eq('id', this.joinedRoom.id);
+            // If it was us who saw it full first, update status to "EM JOGO"
+            if (roomData.status === 'LIVRE' && count >= max) {
+                await supabase.from('ludo_rooms').update({ status: 'EM JOGO' }).eq('id', this.joinedRoom.id);
+            }
 
-            this.time.delayedCall(1500, () => {
+            this.time.delayedCall(1000, () => {
                 this.startGame(orderedColors);
             });
         }
@@ -278,6 +306,7 @@ export class LobbyScene extends Phaser.Scene {
                 .from('ludo_players')
                 .delete()
                 .match({ room_id: this.joinedRoom.id, color: this.myColor });
+        }
         if (this.roomChannel) {
             supabase.removeChannel(this.roomChannel);
             this.roomChannel = null;
@@ -285,6 +314,10 @@ export class LobbyScene extends Phaser.Scene {
         this.joinedRoom = null;
         this.myColor = null;
         this.waitingOverlay.setVisible(false);
+        if (this.fallbackTimer) {
+            this.fallbackTimer.remove();
+            this.fallbackTimer = null;
+        }
         if (this.roomsContainer) this.roomsContainer.setVisible(true);
         this.instructionText.setText('Escolha o modo de jogo');
     }
@@ -347,6 +380,10 @@ export class LobbyScene extends Phaser.Scene {
             fontSize: '16px', fontFamily: 'Arial', fill: '#aaaaaa'
         }).setOrigin(0.5);
 
+        this.waitingRoomInfo = this.add.text(cx, cy + 95, '', {
+            fontSize: '11px', fontFamily: 'Arial', fill: '#666666'
+        }).setOrigin(0.5);
+
         const cancelBtn = this.add.text(cx, cy + 120, 'CANCELAR', {
             fontSize: '14px', fontFamily: 'Arial Black', fill: '#ff5555',
             backgroundColor: '#222', padding: { x: 20, y: 10 }
@@ -360,6 +397,7 @@ export class LobbyScene extends Phaser.Scene {
 
     shutdown() {
         if (this.roomChannel) supabase.removeChannel(this.roomChannel);
+        if (this.fallbackTimer) this.fallbackTimer.remove();
     }
 }
 
