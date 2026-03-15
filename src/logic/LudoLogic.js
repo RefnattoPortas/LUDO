@@ -101,11 +101,8 @@ export class LudoLogic {
         
         if (isChance) {
             shouldNextTurn = false; // suspend turning until chance card is applied
-            this.gameState = 'DRAWING_CHANCE';
-        } else if (getsExtraTurn) {
-            this.gameState = 'WAITING_FOR_ROLL';
         }
-
+        
         return {
             success: true,
             isChance: isChance,

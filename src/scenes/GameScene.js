@@ -901,8 +901,8 @@ export class GameScene extends Phaser.Scene {
         const result = this.logic.movePiece(index, color);
         
         if (result && result.success) {
+            this.logic.gameState = 'SYNCING'; // Bloqueia interações durante a animação
             if (this.mode === 'ONLINE') {
-                this.logic.gameState = 'SYNCING'; 
                 // Stage 2: Tell others piece is moving, but KEEP current turn
                 // This prevents the "jumping turn" bug
                 this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
