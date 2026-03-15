@@ -14,6 +14,7 @@ export class GameScene extends Phaser.Scene {
         this.mode = data?.mode || 'IA';
         this.playerColor = data?.playerColor || 'RED';
         this.activePlayers = data?.activePlayers;
+        this.gameVariation = data?.gameVariation || 'CLASSIC';
         this.roomId = data?.roomId;
         this.turnDuration = 7000; // 7 seconds
         
@@ -48,7 +49,7 @@ export class GameScene extends Phaser.Scene {
         this.activePlayers = this.activePlayers.filter(c => validColors.includes(c));
         if (this.activePlayers.length === 0) this.activePlayers = validColors;
 
-        this.logic = new LudoLogic(this.activePlayers);
+        this.logic = new LudoLogic(this.activePlayers, this.gameVariation);
         this.ai = new LudoAI(this.logic);
         
         if (this.mode === 'IA') {
@@ -74,6 +75,9 @@ export class GameScene extends Phaser.Scene {
         this.diceY = this.boardY + scaledBoardSize + (50 * this.mainScale);
 
         this.drawBoard();
+        if (this.gameVariation === 'LUCK') {
+            this.drawChanceSquares();
+        }
         this.createDiceUI();
         this.createPieces();
         this.updateStatusText();
@@ -198,7 +202,10 @@ export class GameScene extends Phaser.Scene {
     onOnlineUpdate(state) {
         if (!state) return;
         
-        const isMyTurn = (this.mode !== 'ONLINE' || state.current_turn === this.playerColor);
+        // Who initiated this state change?
+        // We look at our local turn that was active just BEFORE applying this state.
+        const isMyAction = (this.mode !== 'ONLINE' || this.logic.turn === this.playerColor);
+        
         const isDifferentTurn = state.current_turn !== this.logic.turn;
         const isDifferentDice = state.last_dice_roll !== this.logic.diceRoll;
         
@@ -216,29 +223,40 @@ export class GameScene extends Phaser.Scene {
 
         const isDifferentPieces = !!movedPiece;
 
-        if (isDifferentTurn || isDifferentDice || isDifferentPieces) {
-            console.log(`[REALTIME] Syncing... Turn=${state.current_turn}, Dice=${state.last_dice_roll}`);
-            
-            // 1. Handle Dice Animation
-            if (isDifferentDice && state.last_dice_roll > 0 && !isMyTurn) {
-                this.animateDice(state.last_dice_roll);
-            }
+        // If nothing changed, do nothing
+        if (!isDifferentTurn && !isDifferentDice && !isDifferentPieces) return;
 
-            // 2. Handle Piece Movement Animation
-            if (isDifferentPieces) {
-                if (!isMyTurn) {
-                    // Someone else moved: Animate it for fluidity
-                    this.logic.diceRoll = state.last_dice_roll; // Ensure logic has the roll needed for calc
-                    this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
-                        this.finishOnlineSync(state);
-                    });
-                } else {
-                    // It was our move: we already animated, just update logic
-                    this.finishOnlineSync(state);
-                }
-            } else {
-                this.finishOnlineSync(state);
-            }
+        // If we are currently animating our own local move, completely ignore the server echo
+        // to prevent flickering and snapping.
+        if (isMyAction && this.logic.gameState === 'SYNCING') {
+             return;
+        }
+
+        console.log(`[REALTIME] Syncing... Turn=${state.current_turn}, Dice=${state.last_dice_roll}`);
+        
+        this.logic.gameState = 'SYNCING'; // Pause local interactions
+
+        // 1. Handle Dice Animation
+        if (isDifferentDice && state.last_dice_roll > 0) {
+            this.animateDice(state.last_dice_roll);
+            // Dice animation takes ~600ms, but usually a dice update comes alone.
+        }
+
+        // 2. Handle Piece Movement Animation
+        if (isDifferentPieces) {
+             // Animate it for fluidity
+             this.logic.diceRoll = state.last_dice_roll; // Ensure logic has the roll needed for calc
+             this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
+                  // After walking, we apply the state
+                  this.finishOnlineSync(state);
+             });
+        } else {
+             // If only dice or turn changed
+             if (isDifferentDice && state.last_dice_roll > 0) {
+                  this.time.delayedCall(700, () => this.finishOnlineSync(state));
+             } else {
+                  this.finishOnlineSync(state);
+             }
         }
     }
 
@@ -334,6 +352,24 @@ export class GameScene extends Phaser.Scene {
         this.drawBase(graphics, 9 * CELL_SIZE, 0, COLORS.YELLOW, 'YELLOW');
         this.drawBase(graphics, 0, 9 * CELL_SIZE, COLORS.RED, 'RED');
         this.drawBase(graphics, 9 * CELL_SIZE, 9 * CELL_SIZE, COLORS.GREEN, 'GREEN');
+
+        if (this.gameVariation === 'TEAM') {
+            const addTeamText = (bx, by, textStr, colorHex) => {
+                const bS = 6 * CELL_SIZE;
+                this.add.text(this.boardX + (bx + bS/2) * this.mainScale, this.boardY + (by + 25) * this.mainScale, textStr, {
+                    fontSize: `${16 * this.mainScale}px`, fontFamily: 'Arial Black', fill: colorHex, alpha: 0.65,
+                    shadow: { offsetX: 0, offsetY: 0, color: '#000', blur: 4, stroke: true, fill: true }
+                }).setOrigin(0.5).setDepth(1);
+            };
+            
+            // Team 1: RED (bottom-left) and YELLOW (top-right)
+            addTeamText(0, 9 * CELL_SIZE, 'TIME 1 - DUPLA DOURADA', '#ffbbbb'); // RED
+            addTeamText(9 * CELL_SIZE, 0, 'TIME 1 - DUPLA DOURADA', '#ffffbb'); // YELLOW
+
+            // Team 2: BLUE (top-left) and GREEN (bottom-right)
+            addTeamText(0, 0, 'TIME 2 - DUPLA ÁGUA', '#bbbbff'); // BLUE
+            addTeamText(9 * CELL_SIZE, 9 * CELL_SIZE, 'TIME 2 - DUPLA ÁGUA', '#bbffbb'); // GREEN
+        }
 
         // Complex Starburst Central Area
         this.drawCentralStarburst(graphics);
@@ -450,6 +486,25 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
+    drawChanceSquares() {
+        const CHANCE_SQUARES = [4, 11, 17, 24, 30, 37, 43, 50];
+        CHANCE_SQUARES.forEach(g => {
+            const pos = g + 1; 
+            const vis = this.getVisualPosition('RED', pos, 0);
+            
+            const icon = this.add.text(vis.x, vis.y, '?', {
+                fontSize: `${22 * this.mainScale}px`,
+                fontFamily: 'Arial Black',
+                fill: '#FFF600',
+                stroke: '#000000',
+                strokeThickness: 5,
+                shadow: { offsetX: 0, offsetY: 0, color: '#000', blur: 5, fill: true }
+            }).setOrigin(0.5).setDepth(3);
+
+            this.tweens.add({ targets: icon, y: vis.y - 6 * this.mainScale, duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+            this.tweens.add({ targets: icon, scaleX: 0.8, duration: 600, yoyo: true, repeat: -1 });
+        });
+    }
 
     createDiceUI() {
         const boardSize = 600 * this.mainScale;
@@ -764,16 +819,16 @@ export class GameScene extends Phaser.Scene {
 
     highlightPossibleMoves() {
         if (this.aiPlayers.includes(this.logic.turn)) return;
-        const color = this.logic.turn;
-        this.logic.pieces[color].forEach((pos, i) => {
-            if (this.logic.canMovePiece(i)) {
-                const container = this.pieceSprites[color][i];
+        const effectiveTurn = this.logic.getEffectiveTurn();
+        this.logic.pieces[effectiveTurn].forEach((pos, i) => {
+            if (this.logic.canMovePiece(i, effectiveTurn)) {
+                const container = this.pieceSprites[effectiveTurn][i];
                 const glow = container.getByName('glow');
                 if (glow) {
                     glow.setAlpha(1);
                     this.tweens.add({
                         targets: glow,
-                        scale: 1.3,
+                        scale: 1.3, // Increased scale 
                         alpha: 0.3,
                         duration: 600,
                         yoyo: true,
@@ -798,12 +853,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     handlePieceClick(color, index) {
+        const effectiveTurn = this.logic.getEffectiveTurn();
         if (this.mode === 'ONLINE') {
-            if (this.logic.turn !== this.playerColor || this.logic.turn !== color) return;
+            if (this.logic.turn !== this.playerColor || effectiveTurn !== color) return;
         }
         if (this.aiPlayers.includes(this.logic.turn)) return;
-        if (this.logic.turn !== color || this.logic.gameState !== 'WAITING_FOR_MOVE') return;
-        if (!this.logic.canMovePiece(index)) return;
+        if (effectiveTurn !== color || this.logic.gameState !== 'WAITING_FOR_MOVE') return;
+        if (!this.logic.canMovePiece(index, effectiveTurn)) return;
 
         this.executeMove(color, index);
     }
@@ -811,96 +867,154 @@ export class GameScene extends Phaser.Scene {
     executeMove(color, index) {
         this.clearHighlights();
         const oldLogPos = this.logic.pieces[color][index];
-        const result = this.logic.movePiece(index);
+        const result = this.logic.movePiece(index, color);
         
         if (result && result.success) {
             if (this.mode === 'ONLINE') {
-                // Change local state to 'SYNCING' to prevent any local logic from 
-                // re-triggering turn changes during the animation.
                 this.logic.gameState = 'SYNCING'; 
-
-                const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
-                this.online.updateGame(nextTurn, 0, this.logic.pieces);
+                // Delay sync for luck since we don't know the outcome yet
+                if (!result.isChance) {
+                    const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
+                    this.online.updateGame(nextTurn, 0, this.logic.pieces);
+                }
             }
-            // Do NOT snap everything to default positions yet, as it can cause flickering
-            // during the start of the walk animation.
             this.updateAllPiecePositions(false, color, index);
 
             this.animatePath(color, index, result.oldPos, result.newPos, () => {
-                if (result.captured && result.captured.length > 0) {
-                    this.cameras.main.shake(150, 0.015);
-
-                    result.captured.forEach(cap => {
-                        const capSprite = this.pieceSprites[cap.color][cap.index];
-                        // Ghost effect starts NOW (attacker just arrived at the same cell)
-                        this.tweens.add({
-                            targets: capSprite,
-                            alpha: 0,
-                            scale: this.pieceScale * 2,
-                            duration: 600,
-                            ease: 'Power2',
-                            onComplete: () => {
-                                // Move back to base while invisible, then fade in
-                                this.updateAllPiecePositions(true);
-                                this.tweens.add({
-                                    targets: capSprite,
-                                    alpha: 1,
-                                    scale: this.pieceScale, // Fixed size
-                                    duration: 400
-                                });
-                            }
-                        });
-                    });
-
-                    this.time.delayedCall(600, () => {
-                        this.updateAllPiecePositions(false);
-                        const winner = this.logic.checkWinner();
-                        if (winner) return this.handleVictory(winner);
-
-                        if (result.shouldNextTurn) {
-                            this.goToNextTurn();
-                        } else {
-                            this.resetDice();
-                            this.updateStatusText();
-                            this.startTurnTimer();
-                            this.checkAITurn();
-                        }
-                    });
+                if (result.isChance) {
+                    this.playChanceCardAnimation(color, index, result);
+                } else if (result.captured && result.captured.length > 0) {
+                    this.animateCaptures(result.captured, () => this.finalizeTurn(result));
                 } else {
                     this.updateAllPiecePositions(false);
-
-                    // Check for victory
-                    const winner = this.logic.checkWinner();
-                    if (winner) {
-                        this.handleVictory(winner);
-                        return;
-                    }
-
-                    if (result.shouldNextTurn) {
-                        // In Online, we already broadcasted the next turn. 
-                        // We just need to update local UI once animation ends.
-                        if (this.mode !== 'ONLINE') {
-                            this.goToNextTurn();
-                        } else {
-                            this.updateStatusText();
-                            this.resetDice();
-                        }
-                    } else {
-                        this.resetDice();
-                        this.updateStatusText();
-                        this.startTurnTimer();
-                        this.checkAITurn();
-                    }
+                    this.finalizeTurn(result);
                 }
             });
         }
     }
+
+    animateCaptures(captured, onComplete) {
+        this.cameras.main.shake(150, 0.015);
+        let animationsDone = 0;
+        
+        captured.forEach(cap => {
+            const capSprite = this.pieceSprites[cap.color][cap.index];
+            this.tweens.add({
+                targets: capSprite,
+                alpha: 0,
+                scale: this.pieceScale * 2,
+                duration: 600,
+                ease: 'Power2',
+                onComplete: () => {
+                    this.updateAllPiecePositions(true);
+                    this.tweens.add({
+                        targets: capSprite,
+                        alpha: 1,
+                        scale: this.pieceScale,
+                        duration: 400,
+                        onComplete: () => {
+                            animationsDone++;
+                            if (animationsDone === captured.length && onComplete) onComplete();
+                        }
+                    });
+                }
+            });
+        });
+        
+        if (captured.length === 0 && onComplete) onComplete(); 
+    }
+
+    finalizeTurn(result) {
+        if (this.mode === 'ONLINE' && result.isChanceResolved) {
+             const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
+             this.online.updateGame(nextTurn, 0, this.logic.pieces);
+        }
+
+        const winner = this.logic.checkWinner();
+        if (winner) return this.handleVictory(winner);
+
+        if (result.shouldNextTurn) {
+            if (this.mode !== 'ONLINE') {
+                this.goToNextTurn();
+            } else {
+                this.updateStatusText();
+                this.resetDice();
+            }
+        } else {
+            this.resetDice();
+            this.updateStatusText();
+            this.startTurnTimer();
+            this.checkAITurn();
+        }
+    }
+
+    playChanceCardAnimation(color, index, originalResult) {
+        const cx = this.cameras.main.centerX;
+        const cy = this.cameras.main.centerY;
+        const cardData = this.logic.drawChanceCard();
+        
+        const cardCont = this.add.container(cx, cy).setDepth(2000).setScale(0);
+        
+        const bgOverlay = this.add.rectangle(0, 0, 2000, 2000, 0x000000, 0.6).setInteractive();
+        const cardBg = this.add.graphics();
+        cardBg.fillStyle(0xffffff, 1);
+        cardBg.fillRoundedRect(-150, -200, 300, 400, 20);
+        cardBg.lineStyle(6, 0xffd700, 1);
+        cardBg.strokeRoundedRect(-150, -200, 300, 400, 20);
+        
+        const title = this.add.text(0, -150, cardData.label, {
+            fontSize: '24px', fontFamily: 'Arial Black', fill: '#000000'
+        }).setOrigin(0.5);
+        
+        const desc = this.add.text(0, 0, cardData.desc, {
+            fontSize: '32px', fontFamily: 'Arial Black', fill: '#ff3333', align: 'center', wordWrap: { width: 260 }
+        }).setOrigin(0.5);
+        
+        cardCont.add([bgOverlay, cardBg, title, desc]);
+        this.add.tween({ targets: cardCont, scale: 1, duration: 400, ease: 'Back.easeOut' });
+        
+        this.time.delayedCall(2500, () => {
+             this.add.tween({ targets: cardCont, scale: 0, duration: 300, ease: 'Back.easeIn', onComplete: () => {
+                  cardCont.destroy();
+                  
+                  const chanceResult = this.logic.applyChanceEffect(color, index, cardData.id);
+                  chanceResult.isChanceResolved = true; 
+                  
+                  this.updateAllPiecePositions(false, color, index);
+                  
+                  this.animatePath(color, index, originalResult.newPos, chanceResult.newPos, () => {
+                        if (chanceResult.captured && chanceResult.captured.length > 0) {
+                             this.animateCaptures(chanceResult.captured, () => this.finalizeTurn(chanceResult));
+                        } else {
+                             this.updateAllPiecePositions(false);
+                             this.finalizeTurn(chanceResult);
+                        }
+                  });
+             }});
+        });
+    }
+
     handleVictory(winner) {
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
         const boardSize = 600 * this.mainScale;
-        const winColor = this.getColorHex(winner);
         const colorNameMap = { RED: 'VERMELHO', BLUE: 'AZUL', YELLOW: 'AMARELO', GREEN: 'VERDE' };
+        
+        // Handle Team Mode Strings and Colors
+        let winColorHex, winnerText, subWinnerText;
+        if (winner === 'RED_TEAM') {
+            winColorHex = this.getColorHex('RED');
+            winnerText = 'VITÓRIA!';
+            subWinnerText = 'EQUIPE VERMELHA E AMARELA';
+        } else if (winner === 'BLUE_TEAM') {
+            winColorHex = this.getColorHex('BLUE');
+            winnerText = 'VITÓRIA!';
+            subWinnerText = 'EQUIPE AZUL E VERDE';
+        } else {
+            winColorHex = this.getColorHex(winner);
+            winnerText = 'VITÓRIA!';
+            subWinnerText = `JOGADOR ${colorNameMap[winner]}`;
+        }
         
         // 1. Create a Mask to prevent anything from going outside the board
         const maskShape = this.make.graphics();
@@ -933,13 +1047,13 @@ export class GameScene extends Phaser.Scene {
         
         const rays = this.add.sprite(cx, cy, 'starburst');
         rays.setScale(this.mainScale * 2);
-        rays.setTint(winColor);
+        rays.setTint(winColorHex);
         rays.setAlpha(0);
         rays.setBlendMode(Phaser.BlendModes.ADD); // Glow effect
         vicContainer.add(rays);
 
         // 5. Main Title Text (Bouncing)
-        const titleText = this.add.text(cx, cy - 40 * this.mainScale, 'VITÓRIA!', {
+        const titleText = this.add.text(cx, cy - 40 * this.mainScale, winnerText, {
             fontSize: `${72 * this.mainScale}px`,
             fontFamily: 'Arial Black',
             fill: '#FFF600', // Gold Yellow
@@ -952,21 +1066,23 @@ export class GameScene extends Phaser.Scene {
         // 6. Subtext Panel (Winner Info)
         const subTextBg = this.add.graphics();
         subTextBg.fillStyle(0x000000, 0.6);
-        subTextBg.fillRoundedRect(cx - 150*this.mainScale, cy + 30*this.mainScale, 300*this.mainScale, 50*this.mainScale, 15);
+        // Wider panel for team names
+        subTextBg.fillRoundedRect(cx - 200*this.mainScale, cy + 30*this.mainScale, 400*this.mainScale, 50*this.mainScale, 15);
         subTextBg.setAlpha(0);
         vicContainer.add(subTextBg);
 
-        const subText = this.add.text(cx, cy + 55 * this.mainScale, `JOGADOR ${colorNameMap[winner]}`, {
-            fontSize: `${24 * this.mainScale}px`,
+        const subTextStringColor = winner.includes('TEAM') ? '#ffffff' : this.getColorHex(winner, true);
+        const subText = this.add.text(cx, cy + 55 * this.mainScale, subWinnerText, {
+            fontSize: `${20 * this.mainScale}px`,
             fontFamily: 'Arial Black',
-            fill: this.getColorHex(winner, true),
-            stroke: '#ffffff',
+            fill: subTextStringColor,
+            stroke: '#000000',
             strokeThickness: 3
         }).setOrigin(0.5).setAlpha(0);
         vicContainer.add(subText);
 
         // 7. Multi-Colored Confetti Emitter
-        const confettiColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, winColor];
+        const confettiColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, winColorHex];
         const emitter = this.add.particles(cx, cy, 'particle_dot', {
             speed: { min: 300, max: 700 }, // Explosive outward speed
             angle: { min: 200, max: 340 }, // Shoot upwards like a fountain
@@ -981,10 +1097,15 @@ export class GameScene extends Phaser.Scene {
         vicContainer.add(emitter);
 
         // 8. Bouncing Winning Pawns (Decorative)
-        const pawnColors = [winner, winner, winner, winner];
+        let pawnColors = [];
+        if (winner === 'RED_TEAM') pawnColors = ['RED', 'YELLOW', 'RED', 'YELLOW'];
+        else if (winner === 'BLUE_TEAM') pawnColors = ['BLUE', 'GREEN', 'BLUE', 'GREEN'];
+        else pawnColors = [winner, winner, winner, winner];
+
         pawnColors.forEach((pColor, i) => {
+            const pawnColorHex = this.getColorHex(pColor);
             const pawn = this.add.graphics();
-            pawn.fillStyle(winColor, 1);
+            pawn.fillStyle(pawnColorHex, 1);
             pawn.lineStyle(2, 0xffffff, 1);
             pawn.fillCircle(0, -10, 8); 
             pawn.strokeCircle(0, -10, 8);
@@ -1069,10 +1190,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     animatePath(color, index, oldPos, newPos, onComplete) {
+        if (oldPos === newPos) {
+            if (onComplete) onComplete();
+            return;
+        }
+
         const sprite = this.pieceSprites[color][index];
         this.children.bringToTop(sprite);
 
-        if (oldPos === 0) {
+        if (oldPos === 0 && newPos !== 0) {
             const pos = this.getVisualPosition(color, newPos, index);
             this.tweens.add({
                 targets: sprite,
@@ -1085,8 +1211,18 @@ export class GameScene extends Phaser.Scene {
             return;
         }
 
+        if (newPos === 0) {
+            const pos = this.getVisualPosition(color, 0, index);
+            this.tweens.add({
+                targets: sprite,x: pos.x,y: pos.y, scale: this.pieceScale,
+                duration: 600,ease: 'Power2',onComplete: onComplete
+            });
+            return;
+        }
+
         const pathCoords = [];
-        for (let p = oldPos + 1; p <= newPos; p++) {
+        const step = oldPos < newPos ? 1 : -1;
+        for (let p = oldPos + step; step > 0 ? p <= newPos : p >= newPos; p += step) {
             pathCoords.push(this.getVisualPosition(color, p, index));
         }
 
@@ -1107,6 +1243,13 @@ export class GameScene extends Phaser.Scene {
             }
         }));
         
+        if (tweensArray.length === 0) {
+            const pos = this.getVisualPosition(color, newPos, index);
+            sprite.setPosition(pos.x, pos.y);
+            if (onComplete) onComplete();
+            return;
+        }
+
         this.tweens.chain({
             targets: sprite,
             tweens: tweensArray,
@@ -1151,9 +1294,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleAIMove() {
+        const effectiveTurn = this.logic.getEffectiveTurn();
         const pieceIndex = this.ai.decideMove(this.logic.turn, this.logic.diceRoll);
         if (pieceIndex !== null) {
-            this.executeMove(this.logic.turn, pieceIndex);
+            this.executeMove(effectiveTurn, pieceIndex);
         } else {
             // No moves possible, logic already called nextTurn
             this.clearHighlights();

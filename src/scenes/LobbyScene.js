@@ -45,9 +45,9 @@ export class LobbyScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Create Room Cards (Vertical List)
-        this.createAddButtons(cx, 190);
+        this.createAddButtons(cx, 180);
 
-        this.roomsContainer = this.add.container(cx, 380);
+        this.roomsContainer = this.add.container(cx, 400);
 
         // Waiting Overlay (hidden by default)
         this.createWaitingOverlay(cx, cy, W, H);
@@ -72,14 +72,18 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     createAddButtons(x, y) {
-        const gap = 85;
-        this.createModernCard(x, y, "PARTIDA DUELO", "2 Jogadores Online", 0x4CAF50, () => this.findOrCreateAndJoin(2));
-        this.createModernCard(x, y + gap, "PARTIDA COMPLETA", "4 Jogadores Online", 0x2196F3, () => this.findOrCreateAndJoin(4));
+        const gapX = 195;
+        const gapY = 70;
+        this.createModernCard(x - gapX, y, "DUELO (2 Jog)", "Clássico", 0x4CAF50, () => this.findOrCreateAndJoin(2, 'CLASSIC'));
+        this.createModernCard(x + gapX, y, "COMPLETA (4)", "Clássico", 0x2196F3, () => this.findOrCreateAndJoin(4, 'CLASSIC'));
+        this.createModernCard(x - gapX, y + gapY, "SORTE/AZAR (2)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(2, 'LUCK'));
+        this.createModernCard(x + gapX, y + gapY, "SORTE/AZAR (4)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(4, 'LUCK'));
+        this.createModernCard(x - gapX, y + gapY * 2, "DUPLAS (4 Jog)", "Time vs Time", 0x9C27B0, () => this.findOrCreateAndJoin(4, 'TEAM'));
     }
 
     createModernCard(x, y, title, subtitle, color, callback) {
         const container = this.add.container(x, y);
-        const w = 380, h = 70;
+        const w = 360, h = 60;
 
         // Glass background
         const bg = this.add.graphics();
@@ -99,17 +103,17 @@ export class LobbyScene extends Phaser.Scene {
         // Simple Icon (Dots)
         const dots = this.add.graphics();
         dots.fillStyle(color, 1);
-        if (title.includes("DUELO")) {
-            dots.fillCircle(-w/2 + 25, -h/2 + 35, 6);
-            dots.fillCircle(-w/2 + 45, -h/2 + 35, 6);
+        if (title.includes("2")) {
+            dots.fillCircle(-w/2 + 25, -h/2 + 30, 6);
+            dots.fillCircle(-w/2 + 45, -h/2 + 30, 6);
         } else {
-            dots.fillCircle(-w/2 + 25, -h/2 + 25, 5);
-            dots.fillCircle(-w/2 + 45, -h/2 + 25, 5);
-            dots.fillCircle(-w/2 + 25, -h/2 + 45, 5);
-            dots.fillCircle(-w/2 + 45, -h/2 + 45, 5);
+            dots.fillCircle(-w/2 + 25, -h/2 + 20, 5);
+            dots.fillCircle(-w/2 + 45, -h/2 + 20, 5);
+            dots.fillCircle(-w/2 + 25, -h/2 + 40, 5);
+            dots.fillCircle(-w/2 + 45, -h/2 + 40, 5);
         }
 
-        const titleTxt = this.add.text(-w/2 + 75, -h/2 + 15, title, {
+        const titleTxt = this.add.text(-w/2 + 75, -h/2 + 10, title, {
             fontSize: '18px', fontFamily: 'Arial Black', fill: '#ffffff'
         });
 
@@ -215,9 +219,13 @@ export class LobbyScene extends Phaser.Scene {
         return container;
     }
 
-    async findOrCreateAndJoin(maxPlayers) {
+    async findOrCreateAndJoin(maxPlayers, variation = 'CLASSIC') {
         this.instructionText.setText("Buscando sala...");
         
+        let nameSuffix = '';
+        if (variation === 'TEAM') nameSuffix = ' | DUPLAS';
+        if (variation === 'LUCK') nameSuffix = ' | SORTE/AZAR';
+
         // 1. Try to find an existing WAITING room that is not full
         const { data: rooms, error } = await supabase
             .from('ludo_rooms')
@@ -230,15 +238,16 @@ export class LobbyScene extends Phaser.Scene {
         
         if (rooms && rooms.length > 0) {
             // Find the first room with available slots
-            targetRoom = rooms.find(r => (r.ludo_players?.length || 0) < maxPlayers);
+            targetRoom = rooms.find(r => (r.ludo_players?.length || 0) < maxPlayers && r.name.includes(nameSuffix));
         }
 
         // 2. If no room found, create a new one
         if (!targetRoom) {
+            const roomName = `Partida ${maxPlayers} Jogadores${nameSuffix}`;
             const { data: newRoom, error: createError } = await supabase
                 .from('ludo_rooms')
                 .insert({
-                    name: `Partida ${maxPlayers} Jogadores`,
+                    name: roomName,
                     max_players: maxPlayers,
                     status: 'LIVRE'
                 })
@@ -351,13 +360,18 @@ export class LobbyScene extends Phaser.Scene {
     startGame(activePlayers) {
         if (!this.joinedRoom) return;
 
+        let variation = 'CLASSIC';
+        if (this.joinedRoom.name.includes('DUPLAS')) variation = 'TEAM';
+        if (this.joinedRoom.name.includes('SORTE')) variation = 'LUCK';
+
         this.cameras.main.fadeOut(300, 0, 0, 0);
         this.cameras.main.once('camerafadeoutcomplete', () => {
             this.scene.start('GameScene', {
                 mode: 'ONLINE',
                 roomId: this.joinedRoom.id,
                 playerColor: this.myColor,
-                activePlayers: activePlayers
+                activePlayers: activePlayers,
+                gameVariation: variation
             });
         });
     }

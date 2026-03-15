@@ -14,11 +14,12 @@ export class LudoAI {
      */
     decideMove(color, roll) {
         const moves = [];
-        const pieces = this.logic.pieces[color];
+        const effectiveColor = this.logic.getEffectiveTurn();
+        const pieces = this.logic.pieces[effectiveColor];
 
         pieces.forEach((pos, index) => {
-            if (this.logic.canMovePiece(index)) {
-                const score = this.calculateMoveScore(color, index, pos, roll);
+            if (this.logic.canMovePiece(index, effectiveColor)) {
+                const score = this.calculateMoveScore(effectiveColor, index, pos, roll);
                 moves.push({ index, score });
             }
         });

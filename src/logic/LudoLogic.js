@@ -1,6 +1,7 @@
 export class LudoLogic {
-    constructor(activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
+    constructor(activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'], gameVariation = 'CLASSIC') {
         this.activePlayers = activePlayers;
+        this.gameVariation = gameVariation;
         this.turn = activePlayers[0];
         this.diceRoll = 0;
         this.consecutiveSixes = 0;
@@ -44,46 +45,73 @@ export class LudoLogic {
         return this.diceRoll;
     }
 
-    canAnyPieceMove() {
-        const playerPieces = this.pieces[this.turn];
-        return playerPieces.some((pos, index) => this.canMovePiece(index));
+    getTeammate(color) {
+        if (color === 'RED') return 'YELLOW';
+        if (color === 'YELLOW') return 'RED';
+        if (color === 'BLUE') return 'GREEN';
+        if (color === 'GREEN') return 'BLUE';
+        return null;
     }
 
-    canMovePiece(pieceIndex) {
+    hasFinished(color) {
+        return this.pieces[color].every(pos => pos === 57);
+    }
+
+    getEffectiveTurn() {
+        if (this.gameVariation !== 'TEAM') return this.turn;
+        if (this.hasFinished(this.turn)) {
+            const teammate = this.getTeammate(this.turn);
+            if (!this.hasFinished(teammate)) return teammate;
+        }
+        return this.turn;
+    }
+
+    canAnyPieceMove() {
+        const effectiveColor = this.getEffectiveTurn();
+        const playerPieces = this.pieces[effectiveColor];
+        return playerPieces.some((_, index) => this.canMovePiece(index, effectiveColor));
+    }
+
+    canMovePiece(pieceIndex, forColor = this.getEffectiveTurn()) {
         if (this.consecutiveSixes >= 3) return false;
-        const pos = this.pieces[this.turn][pieceIndex];
+        const pos = this.pieces[forColor][pieceIndex];
         if (pos === 57) return false; // Already finished
         if (pos === 0) return this.diceRoll === 6;
         if (pos + this.diceRoll > 57) return false; // 52 common + 5 home
         return true;
     }
 
-    movePiece(pieceIndex) {
-        if (this.gameState !== 'WAITING_FOR_MOVE' || !this.canMovePiece(pieceIndex)) return false;
+    movePiece(pieceIndex, forColor = this.getEffectiveTurn()) {
+        if (this.gameState !== 'WAITING_FOR_MOVE' || !this.canMovePiece(pieceIndex, forColor)) return false;
 
-        let currentPos = this.pieces[this.turn][pieceIndex];
+        let currentPos = this.pieces[forColor][pieceIndex];
         const oldPos = currentPos;
 
         if (currentPos === 0) {
-            this.pieces[this.turn][pieceIndex] = 1; // Start
+            this.pieces[forColor][pieceIndex] = 1; // Start
         } else {
-            this.pieces[this.turn][pieceIndex] += this.diceRoll;
+            this.pieces[forColor][pieceIndex] += this.diceRoll;
         }
 
-        const newPos = this.pieces[this.turn][pieceIndex];
-        const captureInfo = this.checkCaptures(this.turn, newPos, true);
+        const newPos = this.pieces[forColor][pieceIndex];
+        const captureInfo = this.checkCaptures(forColor, newPos, true);
+        const isChance = this.isChanceSquare(forColor, newPos);
         const getsExtraTurn = (this.diceRoll === 6 || captureInfo.length > 0 || newPos === 57);
-        const shouldNextTurn = !getsExtraTurn;
-
-        if (getsExtraTurn) {
+        let shouldNextTurn = !getsExtraTurn;
+        
+        if (isChance) {
+            shouldNextTurn = false; // suspend turning until chance card is applied
+            this.gameState = 'DRAWING_CHANCE';
+        } else if (getsExtraTurn) {
             this.gameState = 'WAITING_FOR_ROLL';
         }
 
         return {
             success: true,
+            isChance: isChance,
             captured: captureInfo,
             extraTurn: getsExtraTurn,
-            shouldNextTurn: shouldNextTurn,
+            shouldNextTurn: shouldNextTurn, 
             oldPos: oldPos,
             newPos: newPos
         };
@@ -126,6 +154,7 @@ export class LudoLogic {
         let captures = [];
         Object.keys(this.pieces).forEach(color => {
             if (color === movingPlayer) return;
+            if (this.gameVariation === 'TEAM' && color === this.getTeammate(movingPlayer)) return; // Friendly fire disabled!
 
             this.pieces[color].forEach((otherPos, index) => {
                 // If on path, check logic overlap
@@ -140,6 +169,55 @@ export class LudoLogic {
         return captures;
     }
 
+    isChanceSquare(color, pos) {
+        if (this.gameVariation !== 'LUCK') return false;
+        if (pos <= 0 || pos > 51) return false; // Only global path
+        const starts = { RED: 0, BLUE: 13, YELLOW: 26, GREEN: 39 };
+        const globalPos = (starts[color] + pos - 1) % 52;
+        // Interrogation marks at positions: 4, 11, 17, 24, 30, 37, 43, 50
+        const CHANCE_SQUARES = new Set([4, 11, 17, 24, 30, 37, 43, 50]);
+        return CHANCE_SQUARES.has(globalPos);
+    }
+
+    drawChanceCard() {
+        const effects = [
+            { id: 'FORWARD_3', label: 'AVANÇO RÁPIDO', desc: 'Vá +3 casas!' },
+            { id: 'BACK_4', label: 'VENTO FORTE', desc: 'Volte 4 casas!' },
+            { id: 'EXTRA_TURN', label: 'SORTE GRANDE', desc: 'Jogue novamente!' },
+            { id: 'BASE', label: 'AZAR EXTREMO', desc: 'Voltar para a base.' },
+            { id: 'FORWARD_1', label: 'IMPULSO', desc: 'Vá +1 casa!' }
+        ];
+        return effects[Math.floor(Math.random() * effects.length)];
+    }
+
+    applyChanceEffect(color, index, effectId) {
+        let pos = this.pieces[color][index];
+        let extra = false;
+
+        if (effectId === 'FORWARD_3') pos = Math.min(pos + 3, 57);
+        if (effectId === 'FORWARD_1') pos = Math.min(pos + 1, 57);
+        if (effectId === 'BACK_4') pos = Math.max(pos - 4, 1);
+        if (effectId === 'BASE') pos = 0;
+        if (effectId === 'EXTRA_TURN') extra = true;
+
+        this.pieces[color][index] = pos;
+        
+        let captures = [];
+        if (pos > 0 && pos < 57) {
+            captures = this.checkCaptures(color, pos, true);
+        }
+
+        const extraTurn = extra || captures.length > 0 || pos === 57;
+        
+        if (extraTurn) {
+            this.gameState = 'WAITING_FOR_ROLL';
+        } else {
+            this.nextTurn();
+        }
+
+        return { newPos: pos, captured: captures, extraTurn: extraTurn, shouldNextTurn: !extraTurn };
+    }
+
     isSameGlobalSquare(p1, pos1, p2, pos2) {
         const starts = { RED: 0, BLUE: 13, YELLOW: 26, GREEN: 39 };
         const g1 = (starts[p1] + pos1 - 1) % 52;
@@ -148,8 +226,16 @@ export class LudoLogic {
     }
 
     checkWinner() {
+        if (this.gameVariation === 'TEAM') {
+            const team1Won = this.hasFinished('RED') && this.hasFinished('YELLOW');
+            const team2Won = this.hasFinished('BLUE') && this.hasFinished('GREEN');
+            if (team1Won) return 'RED_TEAM'; // Identifier for Team 1
+            if (team2Won) return 'BLUE_TEAM'; // Identifier for Team 2
+            return null;
+        }
+
         for (const color of ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
-            if (this.pieces[color].every(pos => pos === 57)) {
+            if (this.hasFinished(color)) {
                 return color;
             }
         }

@@ -15,6 +15,7 @@ export class ColorPickScene extends Phaser.Scene {
 
     init(data) {
         this.mode = data?.mode || 'IA';
+        this.gameVariation = 'CLASSIC'; // CLASSIC, TEAM, LUCK
         this.selectedColors = [];
         this.playerCount = (this.mode === 'LOCAL') ? 4 : 2; 
     }
@@ -54,11 +55,12 @@ export class ColorPickScene extends Phaser.Scene {
             fontSize: '17px', fontFamily: 'Arial', fill: '#aaaaaa'
         }).setOrigin(0.5);
 
-        // Player Count Selector
-        this.createPlayerCountSelector(cx, 180);
+        // Selectors
+        this.createVariationSelector(cx, 175);
+        this.createPlayerCountSelector(cx, 225);
 
-        // Color cards — 2x2 grid (Reduced size by 30% and brought closer)
-        const gridY = cy + 50;
+        // Color cards — 2x2 grid
+        const gridY = cy + 75;
         const gapX = 75; // Smaller horizontal gap
         const gapY = 85; // Smaller vertical gap
         const positions = [
@@ -76,6 +78,32 @@ export class ColorPickScene extends Phaser.Scene {
         this.refreshUI();
     }
 
+    createVariationSelector(x, y) {
+        const vars = [
+            { id: 'CLASSIC', label: 'CLÁSSICO' },
+            { id: 'TEAM', label: 'DUPLAS' },
+            { id: 'LUCK', label: 'SORTE/AZAR' }
+        ];
+        this.varButtons = [];
+        vars.forEach((v, i) => {
+            const btnX = x + (i - 1) * 120;
+            const container = this.add.container(btnX, y);
+            const bg = this.add.graphics();
+            const txt = this.add.text(0, 0, v.label, {
+                fontSize: '13px', fontFamily: 'Arial Black', fontWeight: 'bold', fill: '#ffffff'
+            }).setOrigin(0.5);
+
+            container.add([bg, txt]);
+            container.setInteractive(new Phaser.Geom.Rectangle(-55, -20, 110, 40), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
+            container.on('pointerdown', () => {
+                this.gameVariation = v.id;
+                if (v.id === 'TEAM') this.playerCount = 4; // Force 4 players for Team mode
+                this.refreshUI();
+            });
+            this.varButtons.push({ bg, id: v.id });
+        });
+    }
+
     createPlayerCountSelector(x, y) {
         const counts = [2, 3, 4];
         this.countButtons = [];
@@ -90,6 +118,7 @@ export class ColorPickScene extends Phaser.Scene {
             container.add([bg, txt]);
             container.setInteractive(new Phaser.Geom.Rectangle(-45, -20, 90, 40), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
             container.on('pointerdown', () => {
+                if (this.gameVariation === 'TEAM') return; // Locked to 4 in Team mode
                 this.playerCount = num;
                 this.selectedColors = [];
                 this.refreshUI();
@@ -125,10 +154,20 @@ export class ColorPickScene extends Phaser.Scene {
         const isReady = (this.mode === 'LOCAL' ? this.selectedColors.length === this.playerCount : this.selectedColors.length === 1);
         this.tweens.add({ targets: this.startBtn, alpha: isReady ? 1 : 0, y: isReady ? this.cameras.main.height - 80 : this.cameras.main.height - 60, duration: 250 });
 
+        if (this.varButtons) {
+            this.varButtons.forEach(btn => {
+                const isActive = btn.id === this.gameVariation;
+                btn.bg.clear().fillStyle(isActive ? 0x9C27B0 : 0x333333, 1).fillRoundedRect(-55, -20, 110, 40, 10);
+                btn.bg.lineStyle(2, 0xffffff, isActive ? 1 : 0.3).strokeRoundedRect(-55, -20, 110, 40, 10);
+            });
+        }
+
         if (this.countButtons) {
             this.countButtons.forEach(btn => {
-                btn.bg.clear().fillStyle(btn.num === this.playerCount ? 0x2196F3 : 0x333333, 1).fillRoundedRect(-45, -20, 90, 40, 10);
-                btn.bg.lineStyle(2, 0xffffff, btn.num === this.playerCount ? 1 : 0.3).strokeRoundedRect(-45, -20, 90, 40, 10);
+                const isActive = btn.num === this.playerCount;
+                const isLocked = this.gameVariation === 'TEAM' && btn.num !== 4;
+                btn.bg.clear().fillStyle(isActive ? 0x2196F3 : (isLocked ? 0x111111 : 0x333333), isLocked ? 0.3 : 1).fillRoundedRect(-45, -20, 90, 40, 10);
+                btn.bg.lineStyle(2, 0xffffff, isActive ? 1 : 0.1).strokeRoundedRect(-45, -20, 90, 40, 10);
             });
         }
 
@@ -245,7 +284,8 @@ export class ColorPickScene extends Phaser.Scene {
         this.scene.start('GameScene', { 
             mode: this.mode, 
             activePlayers: finalActivePlayers, 
-            playerColor: userColor 
+            playerColor: userColor,
+            gameVariation: this.gameVariation
         });
     }
 
