@@ -680,6 +680,9 @@ export class GameScene extends Phaser.Scene {
             return;
         }
 
+        // Bloqueio físico imediato para evitar spam de eventos
+        this.diceUI[this.logic.turn].container.disableInteractive();
+
         const value = this.logic.rollDice();
         if (value) {
             if (this.mode === 'ONLINE') {
@@ -957,26 +960,28 @@ export class GameScene extends Phaser.Scene {
         const winner = this.logic.checkWinner();
         
         if (this.mode === 'ONLINE' && !isRemote) {
-             // Stage 3: Turn finished. Sync final pieces AND next turn.
              const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
              this.online.updateGame(nextTurn, 0, this.logic.pieces);
         }
 
         if (winner) return this.handleVictory(winner);
 
-        // Turn functionality complete. Always release lock so echo matching works properly.
-        this.logic.gameState = 'WAITING_FOR_ROLL';
+        // Reset roll locally immediately
         this.logic.diceRoll = 0;
 
         if (result.shouldNextTurn) {
+            // Keep the game LOCKED (SYNCING) during the transition delay
+            this.logic.gameState = 'SYNCING';
             this.time.delayedCall(600, () => {
-                 this.logic.nextTurn();
+                 this.logic.nextTurn(); // This will set gameState to WAITING_FOR_ROLL internally
                  this.resetDice();
                  this.updateStatusText();
                  this.startTurnTimer();
                  this.checkAITurn();
             });
         } else {
+            // It's an extra turn for the same player, we can unlock now
+            this.logic.gameState = 'WAITING_FOR_ROLL';
             this.resetDice();
             this.updateStatusText();
             this.startTurnTimer();
