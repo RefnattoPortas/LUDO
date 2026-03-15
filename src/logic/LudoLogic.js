@@ -183,7 +183,7 @@ export class LudoLogic {
         const effects = [
             { id: 'FORWARD_3', label: 'AVANÇO RÁPIDO', desc: 'Vá +3 casas!' },
             { id: 'BACK_4', label: 'VENTO FORTE', desc: 'Volte 4 casas!' },
-            { id: 'EXTRA_TURN', label: 'SORTE GRANDE', desc: 'Jogue novamente!' },
+            { id: 'FORWARD_5', label: 'SALTO LONGO', desc: 'Avançar 5 casas!' },
             { id: 'BASE', label: 'AZAR EXTREMO', desc: 'Voltar para a base.' },
             { id: 'FORWARD_1', label: 'IMPULSO', desc: 'Vá +1 casa!' }
         ];
@@ -192,13 +192,12 @@ export class LudoLogic {
 
     applyChanceEffect(color, index, effectId) {
         let pos = this.pieces[color][index];
-        let extra = false;
 
         if (effectId === 'FORWARD_3') pos = Math.min(pos + 3, 57);
+        if (effectId === 'FORWARD_5') pos = Math.min(pos + 5, 57);
         if (effectId === 'FORWARD_1') pos = Math.min(pos + 1, 57);
         if (effectId === 'BACK_4') pos = Math.max(pos - 4, 1);
         if (effectId === 'BASE') pos = 0;
-        if (effectId === 'EXTRA_TURN') extra = true;
 
         this.pieces[color][index] = pos;
         
@@ -207,14 +206,8 @@ export class LudoLogic {
             captures = this.checkCaptures(color, pos, true);
         }
 
-        const extraTurn = extra || captures.length > 0 || pos === 57;
+        const extraTurn = captures.length > 0 || pos === 57;
         
-        if (extraTurn) {
-            this.gameState = 'WAITING_FOR_ROLL';
-        } else {
-            this.nextTurn();
-        }
-
         return { newPos: pos, captured: captures, extraTurn: extraTurn, shouldNextTurn: !extraTurn };
     }
 
