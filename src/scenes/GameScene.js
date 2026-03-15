@@ -933,13 +933,18 @@ export class GameScene extends Phaser.Scene {
         const winner = this.logic.checkWinner();
         if (winner) return this.handleVictory(winner);
 
+        // Turn functionality complete. Always release lock so echo matching works properly.
+        this.logic.gameState = 'WAITING_FOR_ROLL';
+        this.logic.diceRoll = 0;
+
         if (result.shouldNextTurn) {
-            if (this.mode !== 'ONLINE') {
-                this.goToNextTurn();
-            } else {
-                this.updateStatusText();
-                this.resetDice();
-            }
+            this.time.delayedCall(600, () => {
+                 this.logic.nextTurn();
+                 this.resetDice();
+                 this.updateStatusText();
+                 this.startTurnTimer();
+                 this.checkAITurn();
+            });
         } else {
             this.resetDice();
             this.updateStatusText();
