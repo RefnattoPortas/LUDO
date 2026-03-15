@@ -11,32 +11,16 @@ export class LudoLogic {
             YELLOW: [0, 0, 0, 0],
             GREEN: [0, 0, 0, 0]
         };
-        // Pity Timer tracking: consecutive rolls without getting a 6
-        this.missedSixes = { RED: 0, BLUE: 0, YELLOW: 0, GREEN: 0 };
     }
 
     rollDice() {
         if (this.gameState !== 'WAITING_FOR_ROLL') return null;
-        // Pity Timer Logic ("Proteção contra Má Sorte")
-        // Base chance to roll 6 is ~16.6% (1/6). 
-        // If a player misses 4 times in a row, the chance gradually increases up to 100% on the 10th attempt.
-        const pityChances = [1/6, 1/6, 1/6, 1/6, 0.25, 0.35, 0.50, 0.70, 0.80, 1.0];
-        const misses = Math.min(this.missedSixes[this.turn] || 0, 9);
-        const chanceForSix = pityChances[misses];
-        
-        if (Math.random() <= chanceForSix) {
-            this.diceRoll = 6;
-        } else {
-            // Roll between 1 and 5
-            this.diceRoll = Math.floor(Math.random() * 5) + 1;
-        }
+        this.diceRoll = Math.floor(Math.random() * 6) + 1;
         
         if (this.diceRoll === 6) {
             this.consecutiveSixes++;
-            this.missedSixes[this.turn] = 0; // Reset pity timer on success
         } else {
             this.consecutiveSixes = 0;
-            this.missedSixes[this.turn]++; // Increment missed sixes
         }
 
         this.gameState = 'WAITING_FOR_MOVE';
@@ -73,9 +57,10 @@ export class LudoLogic {
         const newPos = this.pieces[this.turn][pieceIndex];
         const captureInfo = this.checkCaptures(this.turn, newPos, true);
         const getsExtraTurn = (this.diceRoll === 6 || captureInfo.length > 0 || newPos === 57);
-        const shouldNextTurn = !getsExtraTurn;
 
-        if (getsExtraTurn) {
+        if (!getsExtraTurn) {
+            this.nextTurn();
+        } else {
             this.gameState = 'WAITING_FOR_ROLL';
         }
 
@@ -83,19 +68,13 @@ export class LudoLogic {
             success: true,
             captured: captureInfo,
             extraTurn: getsExtraTurn,
-            shouldNextTurn: shouldNextTurn,
             oldPos: oldPos,
             newPos: newPos
         };
     }
 
     nextTurn() {
-        this.turn = this.getNextTurn();
         this.consecutiveSixes = 0;
-        this.gameState = 'WAITING_FOR_ROLL';
-    }
-
-    getNextTurn() {
         const playersOrder = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         let currentIndex = playersOrder.indexOf(this.turn);
         
@@ -105,10 +84,12 @@ export class LudoLogic {
             currentIndex = (currentIndex + 1) % 4;
             const nextColor = playersOrder[currentIndex];
             if (this.activePlayers && this.activePlayers.includes(nextColor)) {
-                return nextColor;
+                this.turn = nextColor;
+                break;
             }
         }
-        return this.turn;
+        
+        this.gameState = 'WAITING_FOR_ROLL';
     }
 
     checkCaptures(movingPlayer, pos, perform = true) {
