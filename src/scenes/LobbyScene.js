@@ -45,9 +45,10 @@ export class LobbyScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // Create Room Cards (Vertical List)
-        this.createAddButtons(cx, 180);
+        this.createAddButtons(cx, 170);
 
-        this.roomsContainer = this.add.container(cx, 400);
+        // Salas ativas mais para baixo
+        this.roomsContainer = this.add.container(cx, 560);
 
         // Waiting Overlay (hidden by default)
         this.createWaitingOverlay(cx, cy, W, H);
@@ -72,13 +73,12 @@ export class LobbyScene extends Phaser.Scene {
     }
 
     createAddButtons(x, y) {
-        const gapX = 195;
         const gapY = 70;
-        this.createModernCard(x - gapX, y, "DUELO (2 Jog)", "Clássico", 0x4CAF50, () => this.findOrCreateAndJoin(2, 'CLASSIC'));
-        this.createModernCard(x + gapX, y, "COMPLETA (4)", "Clássico", 0x2196F3, () => this.findOrCreateAndJoin(4, 'CLASSIC'));
-        this.createModernCard(x - gapX, y + gapY, "SORTE/AZAR (2)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(2, 'LUCK'));
-        this.createModernCard(x + gapX, y + gapY, "SORTE/AZAR (4)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(4, 'LUCK'));
-        this.createModernCard(x - gapX, y + gapY * 2, "DUPLAS (4 Jog)", "Time vs Time", 0x9C27B0, () => this.findOrCreateAndJoin(4, 'TEAM'));
+        this.createModernCard(x, y, "DUELO (2 Jog)", "Clássico", 0x4CAF50, () => this.findOrCreateAndJoin(2, 'CLASSIC'));
+        this.createModernCard(x, y + gapY, "COMPLETA (4)", "Clássico", 0x2196F3, () => this.findOrCreateAndJoin(4, 'CLASSIC'));
+        this.createModernCard(x, y + gapY * 2, "SORTE/AZAR (2)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(2, 'LUCK'));
+        this.createModernCard(x, y + gapY * 3, "SORTE/AZAR (4)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(4, 'LUCK'));
+        this.createModernCard(x, y + gapY * 4, "DUPLAS (4 Jog)", "Time vs Time", 0x9C27B0, () => this.findOrCreateAndJoin(4, 'TEAM'));
     }
 
     createModernCard(x, y, title, subtitle, color, callback) {
