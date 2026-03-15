@@ -105,9 +105,9 @@ export class GameScene extends Phaser.Scene {
             this.online = new LudoOnline(this.roomId, (state) => this.onOnlineUpdate(state));
             this.online.joinRoom(this.playerColor);
             
-            // SECURITY FALLBACK: Sync with server every 5 seconds in case Realtime fails
+            // SECURITY FALLBACK: Sync with server every 3 seconds in case Realtime fails
             this.syncTimer = this.time.addEvent({
-                delay: 5000,
+                delay: 3000,
                 callback: () => this.online.syncWithServer(),
                 loop: true
             });
