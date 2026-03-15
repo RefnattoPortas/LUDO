@@ -58,4 +58,64 @@ export class LudoAI {
         
         return score;
     }
+
+    /**
+     * Decides which piece to target for a selection card effect
+     * @param {string} color The player color
+     * @param {string} effectId The card effect ID
+     * @returns {{color: string, index: number}} The target
+     */
+    decideTarget(color, effectId) {
+        let targetColor = color;
+        let targetIndex = 0;
+        const players = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        const opponentColors = players.filter(p => {
+            const isMe = p === color;
+            const isFriendly = this.logic.gameVariation === 'TEAM' && p === this.logic.getTeammate(color);
+            return this.logic.activePlayers.includes(p) && !isMe && !isFriendly;
+        });
+
+        if (effectId === 'SELECT_MY_START_OR_6') {
+            const pieces = this.logic.pieces[color];
+            // Prefer starting if possible
+            const startIdx = pieces.findIndex(p => p === 0);
+            if (startIdx !== -1) return { color, index: startIdx };
+            // Else move the piece furthest ahead
+            const maxP = Math.max(...pieces.filter(p => p < 57));
+            targetIndex = pieces.indexOf(maxP);
+            return { color, index: (targetIndex === -1 ? 0 : targetIndex) };
+        }
+
+        if (effectId === 'SELECT_OPP_BASE') {
+            // Target the opponent piece closest to finishing (but on board)
+            let maxPos = -1;
+            opponentColors.forEach(c => {
+                this.logic.pieces[c].forEach((pos, idx) => {
+                    if (pos > 0 && pos < 57 && pos > maxPos) {
+                        maxPos = pos;
+                        targetColor = c;
+                        targetIndex = idx;
+                    }
+                });
+            });
+            return { color: targetColor, index: targetIndex };
+        }
+
+        if (effectId === 'SELECT_OPP_MOVE6_OR_START' || effectId === 'SELECT_OPP_ADV4') {
+            // Target the opponent piece furthest behind (to minimize help)
+            let minPos = 100;
+            opponentColors.forEach(c => {
+                this.logic.pieces[c].forEach((pos, idx) => {
+                    if (pos < 57 && pos < minPos) {
+                        minPos = pos;
+                        targetColor = c;
+                        targetIndex = idx;
+                    }
+                });
+            });
+            return { color: targetColor, index: targetIndex };
+        }
+
+        return { color: (opponentColors[0] || color), index: 0 };
+    }
 }

@@ -182,9 +182,47 @@ export class LudoLogic {
             { id: 'BACK_4', label: 'VENTO FORTE', desc: 'Volte 4 casas!' },
             { id: 'FORWARD_5', label: 'SALTO LONGO', desc: 'Avançar 5 casas!' },
             { id: 'BASE', label: 'AZAR EXTREMO', desc: 'Voltar para a base.' },
-            { id: 'FORWARD_1', label: 'IMPULSO', desc: 'Vá +1 casa!' }
+            { id: 'FORWARD_1', label: 'IMPULSO', desc: 'Vá +1 casa!' },
+            // Novas Cartas de Escolha
+            { id: 'SELECT_OPP_BASE', label: 'RAIO SABOTADOR', desc: 'Escolha um pino adversário para voltar à base!' },
+            { id: 'SELECT_OPP_MOVE6_OR_START', label: 'CURA REVERSA', desc: 'Escolha um pino adversário para sair do ninho ou andar 6!' },
+            { id: 'SELECT_OPP_ADV4', label: 'DANDO UMA MÃO', desc: 'Escolha um adversário para avançar 4 casas!' },
+            { id: 'SELECT_MY_START_OR_6', label: 'REFORÇO JÁ', desc: 'Escolha um pino seu: se estiver no ninho ele sai, se estiver no caminho anda 6!' }
         ];
         return effects[Math.floor(Math.random() * effects.length)];
+    }
+
+    // New helper to apply effects to specific targets (for selection cards)
+    applySelectionEffect(color, index, effectId) {
+        let pos = this.pieces[color][index];
+        let oldPos = pos;
+
+        switch(effectId) {
+            case 'SELECT_OPP_BASE':
+                pos = 0;
+                break;
+            case 'SELECT_OPP_MOVE6_OR_START':
+                if (pos === 0) pos = 1;
+                else pos = Math.min(pos + 6, 51); // Don't let opponent enter home stretch via card
+                break;
+            case 'SELECT_OPP_ADV4':
+                if (pos > 0) pos = Math.min(pos + 4, 51);
+                break;
+            case 'SELECT_MY_START_OR_6':
+                if (pos === 0) pos = 1;
+                else pos = Math.min(pos + 6, 57);
+                break;
+        }
+
+        this.pieces[color][index] = pos;
+        
+        let captures = [];
+        if (pos > 0 && pos < 53) {
+            captures = this.checkCaptures(color, pos, true);
+        }
+
+        const extraTurn = captures.length > 0 || pos === 57;
+        return { success: true, oldPos: oldPos, newPos: pos, captured: captures, extraTurn: extraTurn, shouldNextTurn: !extraTurn };
     }
 
     applyChanceEffect(color, index, effectId) {

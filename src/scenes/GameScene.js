@@ -13,9 +13,20 @@ export class GameScene extends Phaser.Scene {
     init(data) {
         this.mode = data?.mode || 'IA';
         this.playerColor = data?.playerColor || 'RED';
-        this.activePlayers = data?.activePlayers;
+        this.humanPlayers = data?.activePlayers || [];
         this.gameVariation = data?.gameVariation || 'CLASSIC';
         this.roomId = data?.roomId;
+
+        // Logic Variation and Forced settings for TEAM_AI
+        if (this.gameVariation === 'TEAM_AI') {
+            this.logicVariation = 'TEAM';
+            this.activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+            this.aiPlayers = ['BLUE', 'GREEN'];
+        } else {
+            this.logicVariation = this.gameVariation;
+            this.activePlayers = data?.activePlayers;
+            this.aiPlayers = [];
+        }
         this.turnDuration = 7000; // 7 seconds
         
         // Safety fallback if data is missing or corrupted
@@ -50,13 +61,13 @@ export class GameScene extends Phaser.Scene {
         this.activePlayers = this.activePlayers.filter(c => validColors.includes(c));
         if (this.activePlayers.length === 0) this.activePlayers = validColors;
 
-        this.logic = new LudoLogic(this.activePlayers, this.gameVariation);
+        this.logic = new LudoLogic(this.activePlayers, this.logicVariation);
         this.ai = new LudoAI(this.logic);
         
         if (this.mode === 'IA') {
             // AI plays all colors except the one the human chose
             this.aiPlayers = this.activePlayers.filter(c => c !== this.playerColor);
-        } else {
+        } else if (this.gameVariation !== 'TEAM_AI') {
             this.aiPlayers = [];
         }
 
@@ -241,11 +252,21 @@ export class GameScene extends Phaser.Scene {
         }
 
         console.log(`[REALTIME] Syncing... Turn=${state.current_turn}, Dice=${state.last_dice_roll}`);
-        
         // Handle Chance Card Animation for others
         if (isNewCard && !isMyAction) {
             this._lastSeenCardId = state.pieces._meta.cardId;
             const cardData = state.pieces._meta.card;
+            
+            // Check if this is a selection completion or initial draw
+            if (state.pieces._meta.targetColor !== undefined) {
+                 // Selection completed remotely
+                 const meta = state.pieces._meta;
+                 this.animatePath(meta.targetColor, meta.targetIndex, movedPiece ? movedPiece.oldPos : state.pieces[meta.targetColor][meta.targetIndex], state.pieces[meta.targetColor][meta.targetIndex], () => {
+                      this.finishOnlineSync(state);
+                 });
+                 return;
+            }
+
             this.playChanceCardAnimation(state.pieces._meta.actorColor, state.pieces._meta.actorIndex, {newPos: state.pieces._meta.actorPos}, cardData);
             return; // playChanceCardAnimation will eventually sync state
         }
@@ -887,6 +908,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     handlePieceClick(color, index) {
+        if (this.logic.gameState === 'WAITING_FOR_SELECTION') {
+            this.executeSelection(color, index);
+            return;
+        }
+
         const effectiveTurn = this.logic.getEffectiveTurn();
         if (this.mode === 'ONLINE') {
             if (this.logic.turn !== this.playerColor || effectiveTurn !== color) return;
@@ -896,6 +922,46 @@ export class GameScene extends Phaser.Scene {
         if (!this.logic.canMovePiece(index, effectiveTurn)) return;
 
         this.executeMove(color, index);
+    }
+
+    executeSelection(color, index) {
+        if (!this.pendingSelection) return;
+        
+        // Validation logic
+        const { effectId, actorColor } = this.pendingSelection;
+        const players = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        const isMe = color === actorColor;
+        const isFriendly = this.logic.gameVariation === 'TEAM' && color === this.logic.getTeammate(actorColor);
+        const isOpponent = !isMe && !isFriendly;
+
+        let valid = false;
+        if (effectId === 'SELECT_MY_START_OR_6' && isMe) valid = true;
+        if (effectId.startsWith('SELECT_OPP_') && isOpponent) valid = true;
+
+        if (!valid) return;
+
+        // Clear highlights
+        this.clearHighlights();
+        
+        const result = this.logic.applySelectionEffect(color, index, effectId);
+        const effectData = { ...this.pendingSelection, targetColor: color, targetIndex: index };
+        this.pendingSelection = null;
+        this.logic.gameState = 'SYNCING';
+
+        if (this.mode === 'ONLINE') {
+            // Tell others about the selection
+            const piecesWithMeta = { ...this.logic.pieces, _meta: { ...effectData, cardId: Date.now() + 1 } };
+            this.online.updateGame(this.logic.turn, 0, piecesWithMeta);
+        }
+
+        this.updateAllPiecePositions(false, color, index);
+        this.animatePath(color, index, result.oldPos, result.newPos, () => {
+             if (result.captured && result.captured.length > 0) {
+                 this.animateCaptures(result.captured, () => this.finalizeTurn(result));
+             } else {
+                 this.finalizeTurn(result);
+             }
+        });
     }
 
     executeMove(color, index) {
@@ -1034,10 +1100,32 @@ export class GameScene extends Phaser.Scene {
              this.add.tween({ targets: cardCont, scale: 0, duration: 300, ease: 'Back.easeIn', onComplete: () => {
                   cardCont.destroy();
                   
-                  const chanceResult = this.logic.applyChanceEffect(color, index, cardData.id);
-                  chanceResult.isChanceResolved = true; 
-                  
-                  this.updateAllPiecePositions(false, color, index);
+                  const isSelectionCard = cardData.id.startsWith('SELECT_');
+                   
+                   if (isSelectionCard) {
+                       if (isRemote) {
+                           // Wait for remote selection update
+                           this.logic.gameState = 'SYNCING';
+                           this.showTemporaryMessage(color, 'Aguardando seleção...');
+                       } else if (this.aiPlayers.includes(this.logic.turn)) {
+                           // AI selects target
+                           const target = this.ai.decideTarget(this.logic.turn, cardData.id);
+                           this.pendingSelection = { effectId: cardData.id, actorColor: color };
+                           this.executeSelection(target.color, target.index);
+                       } else {
+                           // Human selects target
+                           this.logic.gameState = 'WAITING_FOR_SELECTION';
+                           this.pendingSelection = { effectId: cardData.id, actorColor: color };
+                           this.highlightSelectionTargets(cardData.id, color);
+                           this.showTemporaryMessage(color, 'Selecione um pino alvo!');
+                       }
+                       return;
+                   }
+
+                   const chanceResult = this.logic.applyChanceEffect(color, index, cardData.id);
+                   chanceResult.isChanceResolved = true; 
+                   
+                   this.updateAllPiecePositions(false, color, index);
                   
                   this.animatePath(color, index, originalResult.newPos, chanceResult.newPos, () => {
                         if (chanceResult.captured && chanceResult.captured.length > 0) {
@@ -1314,6 +1402,14 @@ export class GameScene extends Phaser.Scene {
         });
     }
 
+    isMaster() {
+        if (this.mode !== 'ONLINE') return true;
+        // Lowest color index among active human players is the master
+        const colors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        const activeHumans = this.humanPlayers.sort((a,b) => colors.indexOf(a) - colors.indexOf(b));
+        return activeHumans[0] === this.playerColor;
+    }
+
     checkAITurn() {
         const turnColor = this.logic.turn;
         const isAI = this.aiPlayers.includes(turnColor);
@@ -1324,9 +1420,15 @@ export class GameScene extends Phaser.Scene {
         });
 
         if (isAI) {
+            // In online mode, only the master player executes the AI turn
+            if (this.mode === 'ONLINE' && !this.isMaster()) return;
+
             this.time.delayedCall(1000, () => {
                 const value = this.logic.rollDice();
                 if (value) {
+                    if (this.mode === 'ONLINE') {
+                        this.online.updateGame(this.logic.turn, value, this.logic.pieces);
+                    }
                     this.processRoll(value);
                 } else {
                     this.resetDice();
@@ -1452,6 +1554,31 @@ export class GameScene extends Phaser.Scene {
                     y: t.targetY,
                     duration: 300,
                     ease: 'Power2'
+                });
+            }
+        });
+    }
+
+    highlightSelectionTargets(effectId, actorColor) {
+        this.clearHighlights();
+        const players = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        
+        players.forEach(pColor => {
+            const isMe = pColor === actorColor;
+            const isFriendly = this.logic.gameVariation === 'TEAM' && pColor === this.logic.getTeammate(actorColor);
+            const isOpponent = !isMe && !isFriendly;
+
+            let shouldHighlight = false;
+            if (effectId === 'SELECT_MY_START_OR_6' && isMe) shouldHighlight = true;
+            if (effectId.startsWith('SELECT_OPP_') && isOpponent) shouldHighlight = true;
+
+            if (shouldHighlight) {
+                this.pieceSprites[pColor].forEach(container => {
+                    const glow = container.getByName('glow');
+                    if (glow) {
+                        glow.setAlpha(1).setTint(0xffff00);
+                        this.tweens.add({ targets: glow, scale: 1.3, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+                    }
                 });
             }
         });

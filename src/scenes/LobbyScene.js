@@ -58,11 +58,12 @@ export class LobbyScene extends Phaser.Scene {
         this.createModernCard(x, y + gapY * 2, "SORTE/AZAR (2)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(2, 'LUCK'));
         this.createModernCard(x, y + gapY * 3, "SORTE/AZAR (4)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(4, 'LUCK'));
         this.createModernCard(x, y + gapY * 4, "DUPLAS (4 Jog)", "Time vs Time", 0x9C27B0, () => this.findOrCreateAndJoin(4, 'TEAM'));
+        this.createModernCard(x, y + gapY * 5, "2 HUM VS 2 I.A.", "Parceria vs Robôs", 0xE91E63, () => this.findOrCreateAndJoin(2, 'TEAM_AI'));
     }
 
     createModernCard(x, y, title, subtitle, color, callback) {
         const container = this.add.container(x, y);
-        const w = 380, h = 80;
+        const w = 304, h = 80; // Reduced from 380 (20%)
 
         // Glass background
         const bg = this.add.graphics();
@@ -140,6 +141,7 @@ export class LobbyScene extends Phaser.Scene {
         
         let nameSuffix = '';
         if (variation === 'TEAM') nameSuffix = ' | DUPLAS';
+        if (variation === 'TEAM_AI') nameSuffix = ' | HUM vs IA';
         if (variation === 'LUCK') nameSuffix = ' | SORTE/AZAR';
 
         // 1. Try to find an existing WAITING room that is not full
@@ -193,6 +195,7 @@ export class LobbyScene extends Phaser.Scene {
         // Custom Rule: If 2 players, use RED and YELLOW
         let availableColors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         if (room.max_players === 2) {
+            // In TEAM_AI, the two humans are RED and YELLOW
             availableColors = ['RED', 'YELLOW'];
         }
 
@@ -218,7 +221,22 @@ export class LobbyScene extends Phaser.Scene {
 
         this.joinedRoom = room;
         this.waitingOverlay.setVisible(true);
-        this.roomsContainer.setVisible(false);
+        this.roomsContainer?.setVisible(false); // Safety check if roomsContainer exists
+
+        // Add Realtime subscription to see others joining
+        if (this.roomChannel) supabase.removeChannel(this.roomChannel);
+        
+        this.roomChannel = supabase.channel(`lobby_${room.id}`)
+            .on('postgres_changes', { 
+                event: '*', 
+                schema: 'public', 
+                table: 'ludo_players', 
+                filter: `room_id=eq.${room.id}` 
+            }, () => {
+                this.onPlayerUpdate();
+            })
+            .subscribe();
+
         this.onPlayerUpdate();
     }
 
@@ -260,11 +278,14 @@ export class LobbyScene extends Phaser.Scene {
                 .from('ludo_players')
                 .delete()
                 .match({ room_id: this.joinedRoom.id, color: this.myColor });
+        if (this.roomChannel) {
+            supabase.removeChannel(this.roomChannel);
+            this.roomChannel = null;
         }
         this.joinedRoom = null;
         this.myColor = null;
         this.waitingOverlay.setVisible(false);
-        this.roomsContainer.setVisible(true);
+        if (this.roomsContainer) this.roomsContainer.setVisible(true);
         this.instructionText.setText('Escolha o modo de jogo');
     }
 
@@ -278,6 +299,7 @@ export class LobbyScene extends Phaser.Scene {
 
         let variation = 'CLASSIC';
         if (this.joinedRoom.name.includes('DUPLAS')) variation = 'TEAM';
+        if (this.joinedRoom.name.includes('HUM vs IA')) variation = 'TEAM_AI';
         if (this.joinedRoom.name.includes('SORTE')) variation = 'LUCK';
 
         this.cameras.main.fadeOut(300, 0, 0, 0);
