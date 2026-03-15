@@ -19,9 +19,10 @@ export class GameScene extends Phaser.Scene {
         this.turnDuration = 7000; // 7 seconds
         
         // Safety fallback if data is missing or corrupted
-        if (!Array.isArray(this.activePlayers) || this.activePlayers.length === 0) {
+        if (!Array.isArray(this.activePlayers) || (this.activePlayers && this.activePlayers.length === 0)) {
             this.activePlayers = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         }
+        this._lastSeenCardId = null;
     }
 
     preload() {
@@ -203,15 +204,16 @@ export class GameScene extends Phaser.Scene {
         if (!state) return;
         
         // Who initiated this state change?
-        // We look at our local turn that was active just BEFORE applying this state.
         const isMyAction = (this.mode !== 'ONLINE' || this.logic.turn === this.playerColor);
         
         const isDifferentTurn = state.current_turn !== this.logic.turn;
         const isDifferentDice = state.last_dice_roll !== this.logic.diceRoll;
         
-        // Find which piece moved
+        // Find which piece moved (Filtering out _meta if present)
         let movedPiece = null;
-        for (const color of ['RED', 'BLUE', 'YELLOW', 'GREEN']) {
+        const colors = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
+        for (const color of colors) {
+            if (!state.pieces[color]) continue;
             for (let i = 0; i < 4; i++) {
                 if (state.pieces[color][i] !== this.logic.pieces[color][i]) {
                     movedPiece = { color, index: i, oldPos: this.logic.pieces[color][i], newPos: state.pieces[color][i] };
@@ -222,37 +224,51 @@ export class GameScene extends Phaser.Scene {
         }
 
         const isDifferentPieces = !!movedPiece;
+        const hasCard = state.pieces._meta && state.pieces._meta.card;
+        const localCardId = this._lastSeenCardId;
+        const isNewCard = hasCard && state.pieces._meta.cardId !== localCardId;
 
         // If nothing changed, do nothing
-        if (!isDifferentTurn && !isDifferentDice && !isDifferentPieces) return;
+        if (!isDifferentTurn && !isDifferentDice && !isDifferentPieces && !isNewCard) return;
 
-        // If we are currently animating our own local move, completely ignore the server echo
-        // to prevent flickering and snapping.
+        // If it's our action and we are already animated, ignore unless it's a critical turn shift
         if (isMyAction && this.logic.gameState === 'SYNCING') {
+             // Exception: if the server says it's definitely the NEXT turn now, we might need to finalize
+             if (isDifferentTurn) {
+                 this.finishOnlineSync(state);
+             }
              return;
         }
 
         console.log(`[REALTIME] Syncing... Turn=${state.current_turn}, Dice=${state.last_dice_roll}`);
         
-        this.logic.gameState = 'SYNCING'; // Pause local interactions
+        // Handle Chance Card Animation for others
+        if (isNewCard && !isMyAction) {
+            this._lastSeenCardId = state.pieces._meta.cardId;
+            const cardData = state.pieces._meta.card;
+            this.playChanceCardAnimation(state.pieces._meta.actorColor, state.pieces._meta.actorIndex, {newPos: state.pieces._meta.actorPos}, cardData);
+            return; // playChanceCardAnimation will eventually sync state
+        }
+
+        this.logic.gameState = 'SYNCING';
 
         // 1. Handle Dice Animation
-        if (isDifferentDice && state.last_dice_roll > 0) {
+        if (isDifferentDice && state.last_dice_roll > 0 && !isMyAction) {
             this.animateDice(state.last_dice_roll);
-            // Dice animation takes ~600ms, but usually a dice update comes alone.
         }
 
         // 2. Handle Piece Movement Animation
         if (isDifferentPieces) {
-             // Animate it for fluidity
-             this.logic.diceRoll = state.last_dice_roll; // Ensure logic has the roll needed for calc
-             this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
-                  // After walking, we apply the state
-                  this.finishOnlineSync(state);
-             });
+             if (!isMyAction) {
+                 this.logic.diceRoll = state.last_dice_roll;
+                 this.animatePath(movedPiece.color, movedPiece.index, movedPiece.oldPos, movedPiece.newPos, () => {
+                      this.finishOnlineSync(state);
+                 });
+             } else {
+                 this.finishOnlineSync(state);
+             }
         } else {
-             // If only dice or turn changed
-             if (isDifferentDice && state.last_dice_roll > 0) {
+             if (isDifferentDice && state.last_dice_roll > 0 && !isMyAction) {
                   this.time.delayedCall(700, () => this.finishOnlineSync(state));
              } else {
                   this.finishOnlineSync(state);
@@ -263,13 +279,28 @@ export class GameScene extends Phaser.Scene {
     finishOnlineSync(state) {
         this.logic.turn = state.current_turn;
         this.logic.diceRoll = state.last_dice_roll;
-        this.logic.pieces = state.pieces;
+        
+        // Filter out meta from pieces
+        const cleanPieces = {};
+        ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(c => {
+            if (state.pieces[c]) cleanPieces[c] = [...state.pieces[c]];
+        });
+        this.logic.pieces = cleanPieces;
+        
         this.logic.gameState = (state.last_dice_roll === 0) ? 'WAITING_FOR_ROLL' : 'WAITING_FOR_MOVE';
         
         this.updateAllPiecePositions(true);
         if (this.logic.gameState === 'WAITING_FOR_ROLL') this.resetDice();
         
         this.updateStatusText();
+        
+        // Check for winner globally
+        const winner = this.logic.checkWinner();
+        if (winner) {
+            this.handleVictory(winner);
+            return;
+        }
+
         this.startTurnTimer();
         this.checkAITurn(); 
     }
@@ -872,11 +903,9 @@ export class GameScene extends Phaser.Scene {
         if (result && result.success) {
             if (this.mode === 'ONLINE') {
                 this.logic.gameState = 'SYNCING'; 
-                // Delay sync for luck since we don't know the outcome yet
-                if (!result.isChance) {
-                    const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
-                    this.online.updateGame(nextTurn, 0, this.logic.pieces);
-                }
+                // Stage 2: Tell others piece is moving, but KEEP current turn
+                // This prevents the "jumping turn" bug
+                this.online.updateGame(this.logic.turn, 0, this.logic.pieces);
             }
             this.updateAllPiecePositions(false, color, index);
 
@@ -893,7 +922,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    animateCaptures(captured, onComplete) {
+    animateCaptures(captured, onComplete, isRemote = false) {
         this.cameras.main.shake(150, 0.015);
         let animationsDone = 0;
         
@@ -924,13 +953,15 @@ export class GameScene extends Phaser.Scene {
         if (captured.length === 0 && onComplete) onComplete(); 
     }
 
-    finalizeTurn(result) {
-        if (this.mode === 'ONLINE' && result.isChanceResolved) {
+    finalizeTurn(result, isRemote = false) {
+        const winner = this.logic.checkWinner();
+        
+        if (this.mode === 'ONLINE' && !isRemote) {
+             // Stage 3: Turn finished. Sync final pieces AND next turn.
              const nextTurn = result.shouldNextTurn ? this.logic.getNextTurn() : this.logic.turn;
              this.online.updateGame(nextTurn, 0, this.logic.pieces);
         }
 
-        const winner = this.logic.checkWinner();
         if (winner) return this.handleVictory(winner);
 
         // Turn functionality complete. Always release lock so echo matching works properly.
@@ -953,11 +984,27 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
-    playChanceCardAnimation(color, index, originalResult) {
+    playChanceCardAnimation(color, index, originalResult, remoteCard = null) {
         const cx = this.cameras.main.centerX;
         const cy = this.cameras.main.centerY;
-        const cardData = this.logic.drawChanceCard();
+        const cardData = remoteCard || this.logic.drawChanceCard();
+        const isRemote = !!remoteCard;
         
+        // Sync card for others if we are the actor
+        if (this.mode === 'ONLINE' && !isRemote) {
+            const piecesWithMeta = { 
+                ...this.logic.pieces, 
+                _meta: { 
+                    card: cardData, 
+                    cardId: Date.now(), 
+                    actorColor: color, 
+                    actorIndex: index,
+                    actorPos: originalResult.newPos
+                } 
+            };
+            this.online.updateGame(this.logic.turn, 0, piecesWithMeta);
+        }
+
         const cardCont = this.add.container(cx, cy).setDepth(2000).setScale(0);
         
         const bgOverlay = this.add.rectangle(0, 0, 2000, 2000, 0x000000, 0.6).setInteractive();
@@ -989,10 +1036,10 @@ export class GameScene extends Phaser.Scene {
                   
                   this.animatePath(color, index, originalResult.newPos, chanceResult.newPos, () => {
                         if (chanceResult.captured && chanceResult.captured.length > 0) {
-                             this.animateCaptures(chanceResult.captured, () => this.finalizeTurn(chanceResult));
+                             this.animateCaptures(chanceResult.captured, () => this.finalizeTurn(chanceResult, isRemote), isRemote);
                         } else {
                              this.updateAllPiecePositions(false);
-                             this.finalizeTurn(chanceResult);
+                             this.finalizeTurn(chanceResult, isRemote);
                         }
                   });
              }});
