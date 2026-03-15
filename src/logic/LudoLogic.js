@@ -137,12 +137,9 @@ export class LudoLogic {
     }
 
     checkCaptures(movingPlayer, pos, perform = true) {
-        if (pos > 52) return []; // Cannot capture if in home stretch
+        if (pos <= 0 || pos > 52) return []; // Cannot capture if in base or home stretch
 
         // Global safe positions (the ones drawn with arrows/stars in GameScene)
-        // RED start=0, BLUE start=13, YELLOW start=26, GREEN start=39
-        // Safe spots (visual stars/gray):
-        // RED: 0 (start), 8 (safe) | BLUE: 13 (start), 21 (safe) | YELLOW: 26 (start), 34 (safe) | GREEN: 39 (start), 47 (safe)
         const safeGlobal = new Set([0, 8, 13, 21, 26, 34, 39, 47]); 
         const starts = { RED: 0, BLUE: 13, YELLOW: 26, GREEN: 39 };
         const movingGlobal = (starts[movingPlayer] + pos - 1) % 52;
@@ -151,10 +148,10 @@ export class LudoLogic {
         let captures = [];
         Object.keys(this.pieces).forEach(color => {
             if (color === movingPlayer) return;
-            if (this.gameVariation === 'TEAM' && color === this.getTeammate(movingPlayer)) return; // Friendly fire disabled!
+            if (this.gameVariation === 'TEAM' && color === this.getTeammate(movingPlayer)) return; 
 
             this.pieces[color].forEach((otherPos, index) => {
-                // If on path, check logic overlap
+                // IMPORTANT: Can only capture if other piece is ON THE PATH (1-52)
                 if (otherPos > 0 && otherPos < 53 && this.isSameGlobalSquare(movingPlayer, pos, color, otherPos)) {
                     if (perform) {
                         this.pieces[color][index] = 0; // Send back to base
@@ -196,6 +193,7 @@ export class LudoLogic {
     applySelectionEffect(color, index, effectId) {
         let pos = this.pieces[color][index];
         let oldPos = pos;
+        let needsCapture = false;
 
         switch(effectId) {
             case 'SELECT_OPP_BASE':
@@ -204,44 +202,53 @@ export class LudoLogic {
             case 'SELECT_OPP_MOVE6_OR_START':
                 if (pos === 0) pos = 1;
                 else pos = Math.min(pos + 6, 51); // Don't let opponent enter home stretch via card
+                needsCapture = true; 
                 break;
             case 'SELECT_OPP_ADV4':
                 if (pos > 0) pos = Math.min(pos + 4, 51);
+                needsCapture = true;
                 break;
             case 'SELECT_MY_START_OR_6':
                 if (pos === 0) pos = 1;
                 else pos = Math.min(pos + 6, 57);
+                needsCapture = true;
                 break;
         }
 
         this.pieces[color][index] = pos;
         
         let captures = [];
-        if (pos > 0 && pos < 53) {
+        // Only capture if moving and on path (pos > 0 and pos < 53)
+        if (needsCapture && pos > 0 && pos < 53) {
             captures = this.checkCaptures(color, pos, true);
         }
 
-        const extraTurn = captures.length > 0 || pos === 57;
+        // Selection effects DO NOT grant extra turns based on die roll (it's 0)
+        // Only a capture or finishing grants an extra turn
+        const extraTurn = (captures.length > 0 || pos === 57);
         return { success: true, oldPos: oldPos, newPos: pos, captured: captures, extraTurn: extraTurn, shouldNextTurn: !extraTurn };
     }
 
     applyChanceEffect(color, index, effectId) {
         let pos = this.pieces[color][index];
+        let needsCapture = false;
 
-        if (effectId === 'FORWARD_3') pos = Math.min(pos + 3, 57);
-        if (effectId === 'FORWARD_5') pos = Math.min(pos + 5, 57);
-        if (effectId === 'FORWARD_1') pos = Math.min(pos + 1, 57);
-        if (effectId === 'BACK_4') pos = Math.max(pos - 4, 1);
-        if (effectId === 'BASE') pos = 0;
+        if (effectId === 'FORWARD_3') { pos = Math.min(pos + 3, 57); needsCapture = true; }
+        if (effectId === 'FORWARD_5') { pos = Math.min(pos + 5, 57); needsCapture = true; }
+        if (effectId === 'FORWARD_1') { pos = Math.min(pos + 1, 57); needsCapture = true; }
+        if (effectId === 'BACK_4') { pos = Math.max(pos - 4, 1); needsCapture = true; }
+        if (effectId === 'BASE') { pos = 0; needsCapture = false; }
 
         this.pieces[color][index] = pos;
         
         let captures = [];
-        if (pos > 0 && pos < 57) {
+        if (needsCapture && pos > 0 && pos < 53) {
             captures = this.checkCaptures(color, pos, true);
         }
 
-        const extraTurn = captures.length > 0 || pos === 57;
+        // A card effect grants an extra turn ONLY if it captures or finishes.
+        // It should NOT inherit the "extra turn" from the dice roll that triggered the interrogative square.
+        const extraTurn = (captures.length > 0 || pos === 57);
         
         return { newPos: pos, captured: captures, extraTurn: extraTurn, shouldNextTurn: !extraTurn };
     }

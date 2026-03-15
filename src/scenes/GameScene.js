@@ -131,6 +131,7 @@ export class GameScene extends Phaser.Scene {
             this.checkAITurn();
         }
 
+        this.isVisualAnimating = false;
         this.startTurnTimer();
     }
 
@@ -207,6 +208,7 @@ export class GameScene extends Phaser.Scene {
             
             this.updateStatusText();
             this.startTurnTimer();
+            this.isVisualAnimating = false;
             this.checkAITurn();
         });
     }
@@ -272,6 +274,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         this.logic.gameState = 'SYNCING';
+        this.isVisualAnimating = true;
 
         // 1. Handle Dice Animation
         if (isDifferentDice && state.last_dice_roll > 0 && !isMyAction) {
@@ -323,6 +326,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         this.startTurnTimer();
+        this.isVisualAnimating = false;
         this.checkAITurn(); 
     }
 
@@ -695,12 +699,15 @@ export class GameScene extends Phaser.Scene {
     }
 
     handleRoll() {
+        if (this.isVisualAnimating) return;
+
         if (this.mode === 'ONLINE') {
             if (this.logic.turn !== this.playerColor || this.logic.gameState !== 'WAITING_FOR_ROLL') return;
         } else if (this.aiPlayers.includes(this.logic.turn) || this.logic.gameState !== 'WAITING_FOR_ROLL') {
             return;
         }
 
+        this.isVisualAnimating = true;
         // Bloqueio físico imediato para evitar spam de eventos
         this.diceUI[this.logic.turn].container.disableInteractive();
 
@@ -742,6 +749,7 @@ export class GameScene extends Phaser.Scene {
             if (forceAI || this.aiPlayers.includes(this.logic.turn)) {
                 this.time.delayedCall(600, () => this.handleAIMove());
             } else {
+                this.isVisualAnimating = false; // Release for human to pick piece
                 this.highlightPossibleMoves();
             }
         });
@@ -908,6 +916,8 @@ export class GameScene extends Phaser.Scene {
     }
 
     handlePieceClick(color, index) {
+        if (this.isVisualAnimating) return;
+        
         if (this.logic.gameState === 'WAITING_FOR_SELECTION') {
             this.executeSelection(color, index);
             return;
@@ -947,6 +957,7 @@ export class GameScene extends Phaser.Scene {
         const effectData = { ...this.pendingSelection, targetColor: color, targetIndex: index };
         this.pendingSelection = null;
         this.logic.gameState = 'SYNCING';
+        this.isVisualAnimating = true;
 
         if (this.mode === 'ONLINE') {
             // Tell others about the selection
@@ -978,6 +989,7 @@ export class GameScene extends Phaser.Scene {
             }
             this.updateAllPiecePositions(false, color, index);
 
+            this.isVisualAnimating = true;
             this.animatePath(color, index, result.oldPos, result.newPos, () => {
                 if (result.isChance) {
                     this.playChanceCardAnimation(color, index, result);
@@ -1038,20 +1050,25 @@ export class GameScene extends Phaser.Scene {
         if (result.shouldNextTurn) {
             // Keep the game LOCKED (SYNCING) during the transition delay
             this.logic.gameState = 'SYNCING';
-            this.time.delayedCall(600, () => {
+            this.isVisualAnimating = true;
+            this.time.delayedCall(800, () => {
                  this.logic.nextTurn(); // This will set gameState to WAITING_FOR_ROLL internally
                  this.resetDice();
                  this.updateStatusText();
                  this.startTurnTimer();
+                 this.isVisualAnimating = false;
                  this.checkAITurn();
             });
         } else {
             // It's an extra turn for the same player, we can unlock now
-            this.logic.gameState = 'WAITING_FOR_ROLL';
-            this.resetDice();
-            this.updateStatusText();
-            this.startTurnTimer();
-            this.checkAITurn();
+            this.time.delayedCall(500, () => {
+                this.logic.gameState = 'WAITING_FOR_ROLL';
+                this.resetDice();
+                this.updateStatusText();
+                this.startTurnTimer();
+                this.isVisualAnimating = false;
+                this.checkAITurn();
+            });
         }
     }
 
@@ -1343,52 +1360,61 @@ export class GameScene extends Phaser.Scene {
         const sprite = this.pieceSprites[color][index];
         this.children.bringToTop(sprite);
 
+        // Movement from base (0) to start (1)
         if (oldPos === 0 && newPos !== 0) {
             const pos = this.getVisualPosition(color, newPos, index);
             this.tweens.add({
                 targets: sprite,
                 x: pos.x,
                 y: pos.y,
-                duration: 300,
+                duration: 400,
+                ease: 'Back.easeOut',
+                onComplete: onComplete
+            });
+            return;
+        }
+
+        // Movement back to base (pos 0)
+        if (newPos === 0) {
+            const pos = this.getVisualPosition(color, 0, index);
+            this.tweens.add({
+                targets: sprite,
+                x: pos.x,
+                y: pos.y,
+                scale: this.pieceScale,
+                duration: 600,
                 ease: 'Power2',
                 onComplete: onComplete
             });
             return;
         }
 
-        if (newPos === 0) {
-            const pos = this.getVisualPosition(color, 0, index);
-            this.tweens.add({
-                targets: sprite,x: pos.x,y: pos.y, scale: this.pieceScale,
-                duration: 600,ease: 'Power2',onComplete: onComplete
-            });
-            return;
-        }
-
+        // Step-by-step movement
         const pathCoords = [];
         const step = oldPos < newPos ? 1 : -1;
         for (let p = oldPos + step; step > 0 ? p <= newPos : p >= newPos; p += step) {
             pathCoords.push(this.getVisualPosition(color, p, index));
         }
 
-        let tweensArray = pathCoords.map(target => ({
-            x: target.x,
-            y: target.y - 3, // Very small jump UP (3px)
-            duration: 70,     // Ascend
-            ease: 'Sine.easeOut',
-            onComplete: () => {
-                // Descend back to grid
-                this.tweens.add({
-                    targets: sprite,
-                    x: target.x,
-                    y: target.y,
-                    duration: 70, // Descend
-                    ease: 'Sine.easeIn'
-                });
-            }
-        }));
-        
-        if (tweensArray.length === 0) {
+        const chainTweens = [];
+        pathCoords.forEach(target => {
+            // Jump Up
+            chainTweens.push({
+                x: target.x,
+                y: target.y - 12, // More visible jump
+                duration: 80,
+                ease: 'Sine.easeOut'
+            });
+            // Land Down
+            chainTweens.push({
+                x: target.x,
+                y: target.y,
+                duration: 80,
+                ease: 'Sine.easeIn'
+            });
+        });
+
+        if (chainTweens.length === 0) {
             const pos = this.getVisualPosition(color, newPos, index);
             sprite.setPosition(pos.x, pos.y);
             if (onComplete) onComplete();
@@ -1397,7 +1423,7 @@ export class GameScene extends Phaser.Scene {
 
         this.tweens.chain({
             targets: sprite,
-            tweens: tweensArray,
+            tweens: chainTweens,
             onComplete: onComplete
         });
     }
@@ -1413,6 +1439,8 @@ export class GameScene extends Phaser.Scene {
     checkAITurn() {
         const turnColor = this.logic.turn;
         const isAI = this.aiPlayers.includes(turnColor);
+
+        if (this.isVisualAnimating) return; // Wait if visual is still busy
 
         // Disable all dice first
         ['RED', 'BLUE', 'YELLOW', 'GREEN'].forEach(color => {
@@ -1463,6 +1491,7 @@ export class GameScene extends Phaser.Scene {
             if (this.logic.gameState === 'WAITING_FOR_ROLL') {
                 this.resetDice();
             }
+            this.isVisualAnimating = false;
             this.checkAITurn();
         }
     }
