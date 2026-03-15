@@ -57,9 +57,10 @@ export class LudoLogic {
         const newPos = this.pieces[this.turn][pieceIndex];
         const captureInfo = this.checkCaptures(this.turn, newPos, true);
         const getsExtraTurn = (this.diceRoll === 6 || captureInfo.length > 0 || newPos === 57);
-        const shouldNextTurn = !getsExtraTurn;
 
-        if (getsExtraTurn) {
+        if (!getsExtraTurn) {
+            this.nextTurn();
+        } else {
             this.gameState = 'WAITING_FOR_ROLL';
         }
 
@@ -67,19 +68,13 @@ export class LudoLogic {
             success: true,
             captured: captureInfo,
             extraTurn: getsExtraTurn,
-            shouldNextTurn: shouldNextTurn,
             oldPos: oldPos,
             newPos: newPos
         };
     }
 
     nextTurn() {
-        this.turn = this.getNextTurn();
         this.consecutiveSixes = 0;
-        this.gameState = 'WAITING_FOR_ROLL';
-    }
-
-    getNextTurn() {
         const playersOrder = ['RED', 'BLUE', 'YELLOW', 'GREEN'];
         let currentIndex = playersOrder.indexOf(this.turn);
         
@@ -89,10 +84,12 @@ export class LudoLogic {
             currentIndex = (currentIndex + 1) % 4;
             const nextColor = playersOrder[currentIndex];
             if (this.activePlayers && this.activePlayers.includes(nextColor)) {
-                return nextColor;
+                this.turn = nextColor;
+                break;
             }
         }
-        return this.turn;
+        
+        this.gameState = 'WAITING_FOR_ROLL';
     }
 
     checkCaptures(movingPlayer, pos, perform = true) {
