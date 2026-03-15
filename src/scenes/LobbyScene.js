@@ -47,33 +47,12 @@ export class LobbyScene extends Phaser.Scene {
         // Create Room Cards (Vertical List)
         this.createAddButtons(cx, 170);
 
-        // Salas ativas mais para baixo
-        this.roomsContainer = this.add.container(cx, 560);
-
         // Waiting Overlay (hidden by default)
         this.createWaitingOverlay(cx, cy, W, H);
-
-        // Initial fetch
-        this.refreshRoomList();
-        this.time.addEvent({ delay: 5000, callback: () => this.refreshRoomList(), loop: true });
-
-        // Subscribe to room updates (Realtime)
-        this.roomChannel = supabase
-            .channel('lobby_rooms')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'ludo_rooms' }, () => this.refreshRoomList())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'ludo_players' }, () => this.onPlayerUpdate())
-            .subscribe((status) => console.log(`[LobbyRealtime] Status: ${status}`));
-
-        this.events.once('shutdown', () => {
-            if (this.roomChannel) {
-                supabase.removeChannel(this.roomChannel);
-                this.roomChannel = null;
-            }
-        });
     }
 
     createAddButtons(x, y) {
-        const gapY = 70;
+        const gapY = 90;
         this.createModernCard(x, y, "DUELO (2 Jog)", "Clássico", 0x4CAF50, () => this.findOrCreateAndJoin(2, 'CLASSIC'));
         this.createModernCard(x, y + gapY, "COMPLETA (4)", "Clássico", 0x2196F3, () => this.findOrCreateAndJoin(4, 'CLASSIC'));
         this.createModernCard(x, y + gapY * 2, "SORTE/AZAR (2)", "Cartas", 0xFF9800, () => this.findOrCreateAndJoin(2, 'LUCK'));
@@ -83,42 +62,42 @@ export class LobbyScene extends Phaser.Scene {
 
     createModernCard(x, y, title, subtitle, color, callback) {
         const container = this.add.container(x, y);
-        const w = 360, h = 60;
+        const w = 380, h = 80;
 
         // Glass background
         const bg = this.add.graphics();
-        bg.fillStyle(0x1a1a2e, 0.8);
-        bg.fillRoundedRect(-w/2, -h/2, w, h, 12);
+        bg.fillStyle(0x1a1a2e, 0.85);
+        bg.fillRoundedRect(-w/2, -h/2, w, h, 14);
         
         // Neon edge
         const edge = this.add.graphics();
         edge.lineStyle(2, color, 1);
-        edge.strokeRoundedRect(-w/2, -h/2, w, h, 12);
+        edge.strokeRoundedRect(-w/2, -h/2, w, h, 14);
 
         // Icon Area
         const iconBg = this.add.graphics();
         iconBg.fillStyle(color, 0.2);
-        iconBg.fillRoundedRect(-w/2 + 10, -h/2 + 10, 50, 50, 8);
+        iconBg.fillRoundedRect(-w/2 + 15, -h/2 + 15, 50, 50, 10);
         
         // Simple Icon (Dots)
         const dots = this.add.graphics();
         dots.fillStyle(color, 1);
         if (title.includes("2")) {
-            dots.fillCircle(-w/2 + 25, -h/2 + 30, 6);
-            dots.fillCircle(-w/2 + 45, -h/2 + 30, 6);
+            dots.fillCircle(-w/2 + 30, -h/2 + 40, 6);
+            dots.fillCircle(-w/2 + 50, -h/2 + 40, 6);
         } else {
-            dots.fillCircle(-w/2 + 25, -h/2 + 20, 5);
-            dots.fillCircle(-w/2 + 45, -h/2 + 20, 5);
-            dots.fillCircle(-w/2 + 25, -h/2 + 40, 5);
-            dots.fillCircle(-w/2 + 45, -h/2 + 40, 5);
+            dots.fillCircle(-w/2 + 30, -h/2 + 30, 5);
+            dots.fillCircle(-w/2 + 50, -h/2 + 30, 5);
+            dots.fillCircle(-w/2 + 30, -h/2 + 50, 5);
+            dots.fillCircle(-w/2 + 50, -h/2 + 50, 5);
         }
 
-        const titleTxt = this.add.text(-w/2 + 75, -h/2 + 10, title, {
-            fontSize: '18px', fontFamily: 'Arial Black', fill: '#ffffff'
+        const titleTxt = this.add.text(-w/2 + 85, -h/2 + 16, title, {
+            fontSize: '20px', fontFamily: 'Arial Black', fill: '#ffffff'
         });
 
-        const subTxt = this.add.text(-w/2 + 75, -h/2 + 40, subtitle, {
-            fontSize: '13px', fontFamily: 'Arial', fill: '#aaaaaa'
+        const subTxt = this.add.text(-w/2 + 85, -h/2 + 44, subtitle, {
+            fontSize: '15px', fontFamily: 'Arial', fill: '#aaaaaa'
         });
 
         container.add([bg, edge, iconBg, dots, titleTxt, subTxt]);
@@ -128,11 +107,11 @@ export class LobbyScene extends Phaser.Scene {
         container.on('pointerdown', callback);
         container.on('pointerover', () => {
             this.tweens.add({ targets: container, scale: 1.03, duration: 150 });
-            edge.clear().lineStyle(3, color, 1).strokeRoundedRect(-w/2, -h/2, w, h, 12);
+            edge.clear().lineStyle(3, color, 1).strokeRoundedRect(-w/2, -h/2, w, h, 14);
         });
         container.on('pointerout', () => {
             this.tweens.add({ targets: container, scale: 1, duration: 150 });
-            edge.clear().lineStyle(2, color, 0.6).strokeRoundedRect(-w/2, -h/2, w, h, 12);
+            edge.clear().lineStyle(2, color, 0.6).strokeRoundedRect(-w/2, -h/2, w, h, 14);
         });
 
         return container;
@@ -153,69 +132,6 @@ export class LobbyScene extends Phaser.Scene {
         container.add([bg, txt]);
         container.setInteractive(new Phaser.Geom.Rectangle(-75, -20, 150, 40), Phaser.Geom.Rectangle.Contains, { useHandCursor: true });
         container.on('pointerdown', callback);
-        return container;
-    }
-
-    async refreshRoomList() {
-        if (!this.sys || !this.sys.isActive()) return;
-        if (this.joinedRoom) return;
-
-        const { data: rooms } = await supabase
-            .from('ludo_rooms')
-            .select(`*, ludo_players (id)`)
-            .eq('status', 'LIVRE')
-            .order('created_at', { ascending: false })
-            .limit(10);
-
-        this.roomsContainer.removeAll(true);
-        if (!rooms || rooms.length === 0) {
-            const emptyTxt = this.add.text(0, 50, 'Nenhuma sala pública encontrada.\nCrie uma acima para começar!', {
-                fontSize: '16px', fontFamily: 'Arial', fill: '#888', align: 'center'
-            }).setOrigin(0.5).setAlpha(0.7);
-            this.roomsContainer.add(emptyTxt);
-            return;
-        }
-
-        rooms.forEach((room, i) => {
-            const item = this.createRoomListItem(0, i * 75, room);
-            this.roomsContainer.add(item);
-        });
-    }
-
-    createRoomListItem(x, y, room) {
-        const container = this.add.container(x, y);
-        const w = 450, h = 60;
-        const playerCount = room.ludo_players?.length || 0;
-
-        const bg = this.add.graphics();
-        bg.fillStyle(0x1a1a2e, 0.7);
-        bg.fillRoundedRect(-w/2, -h/2, w, h, 12);
-        bg.lineStyle(1.5, 0xffffff, 0.2);
-        bg.strokeRoundedRect(-w/2, -h/2, w, h, 12);
-
-        const title = this.add.text(-w/2 + 20, 0, room.name.toUpperCase(), {
-            fontSize: '16px', fontFamily: 'Arial Black', fill: '#fff'
-        }).setOrigin(0, 0.5);
-
-        const status = this.add.text(w/2 - 120, 0, `${playerCount}/${room.max_players} Jogadores`, {
-            fontSize: '14px', fontFamily: 'Arial', fill: '#aaa'
-        }).setOrigin(1, 0.5);
-
-        const joinBtn = this.add.text(w/2 - 20, 0, 'ENTRAR', {
-            fontSize: '14px', fontFamily: 'Arial Black', fill: '#4CAF50',
-            backgroundColor: '#1e1e1e', padding: { x: 10, y: 5 }
-        })
-        .setOrigin(1, 0.5)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this.joinRoom(room));
-
-        container.add([bg, title, status, joinBtn]);
-
-        // Hover Effect
-        container.setInteractive(new Phaser.Geom.Rectangle(-w/2, -h/2, w, h), Phaser.Geom.Rectangle.Contains);
-        container.on('pointerover', () => bg.lineStyle(1.5, 0xffffff, 0.6).strokeRoundedRect(-w/2, -h/2, w, h, 12));
-        container.on('pointerout', () => bg.lineStyle(1.5, 0xffffff, 0.2).strokeRoundedRect(-w/2, -h/2, w, h, 12));
-
         return container;
     }
 
