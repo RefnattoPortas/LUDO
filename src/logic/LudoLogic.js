@@ -14,22 +14,27 @@ export class LudoLogic {
         };
         // Pity Timer tracking: consecutive rolls without getting a 6
         this.missedSixes = { RED: 0, BLUE: 0, YELLOW: 0, GREEN: 0 };
+        this.forcedRolls = {}; // Stores forced values for specific players: { 'BLUE': 6 }
     }
 
     rollDice() {
         if (this.gameState !== 'WAITING_FOR_ROLL') return null;
-        // Pity Timer Logic ("Proteção contra Má Sorte")
-        // Base chance to roll 6 is ~16.6% (1/6). 
-        // If a player misses 4 times in a row, the chance gradually increases up to 100% on the 10th attempt.
-        const pityChances = [1/6, 1/6, 1/6, 1/6, 0.25, 0.35, 0.50, 0.70, 0.80, 1.0];
-        const misses = Math.min(this.missedSixes[this.turn] || 0, 9);
-        const chanceForSix = pityChances[misses];
-        
-        if (Math.random() <= chanceForSix) {
-            this.diceRoll = 6;
+        // Check for Forced Rolls (from cards)
+        if (this.forcedRolls[this.turn]) {
+            this.diceRoll = this.forcedRolls[this.turn];
+            delete this.forcedRolls[this.turn];
         } else {
-            // Roll between 1 and 5
-            this.diceRoll = Math.floor(Math.random() * 5) + 1;
+            // Pity Timer Logic ("Proteção contra Má Sorte")
+            const pityChances = [1/6, 1/6, 1/6, 1/6, 0.25, 0.35, 0.50, 0.70, 0.80, 1.0];
+            const misses = Math.min(this.missedSixes[this.turn] || 0, 9);
+            const chanceForSix = pityChances[misses];
+            
+            if (Math.random() <= chanceForSix) {
+                this.diceRoll = 6;
+            } else {
+                // Roll between 1 and 5
+                this.diceRoll = Math.floor(Math.random() * 5) + 1;
+            }
         }
         
         if (this.diceRoll === 6) {
@@ -180,11 +185,11 @@ export class LudoLogic {
             { id: 'FORWARD_5', label: 'SALTO LONGO', desc: 'Avançar 5 casas!' },
             { id: 'BASE', label: 'AZAR EXTREMO', desc: 'Voltar para a base.' },
             { id: 'FORWARD_1', label: 'IMPULSO', desc: 'Vá +1 casa!' },
-            // Novas Cartas de Escolha
-            { id: 'SELECT_OPP_BASE', label: 'RAIO SABOTADOR', desc: 'Escolha um pino adversário para voltar à base!' },
+            { id: 'FORWARD_6', label: 'TURBO', desc: 'Vá +6 casas!' },
+            { id: 'NEXT_OPP_6', label: 'SORTE COMPARTILHADA', desc: 'O próximo oponente garantirá um 6 no dado!' },
+            // Cartas de Escolha
             { id: 'SELECT_OPP_MOVE6_OR_START', label: 'CURA REVERSA', desc: 'Escolha um pino adversário para sair do ninho ou andar 6!' },
-            { id: 'SELECT_OPP_ADV4', label: 'DANDO UMA MÃO', desc: 'Escolha um adversário para avançar 4 casas!' },
-            { id: 'SELECT_MY_START_OR_6', label: 'REFORÇO JÁ', desc: 'Escolha um pino seu: se estiver no ninho ele sai, se estiver no caminho anda 6!' }
+            { id: 'SELECT_OPP_ADV4', label: 'DANDO UMA MÃO', desc: 'Escolha um adversário para avançar 4 casas!' }
         ];
         return effects[Math.floor(Math.random() * effects.length)];
     }
@@ -235,9 +240,16 @@ export class LudoLogic {
 
         if (effectId === 'FORWARD_3') { pos = Math.min(pos + 3, 57); needsCapture = true; }
         if (effectId === 'FORWARD_5') { pos = Math.min(pos + 5, 57); needsCapture = true; }
+        if (effectId === 'FORWARD_6') { pos = Math.min(pos + 6, 57); needsCapture = true; }
         if (effectId === 'FORWARD_1') { pos = Math.min(pos + 1, 57); needsCapture = true; }
         if (effectId === 'BACK_4') { pos = Math.max(pos - 4, 1); needsCapture = true; }
         if (effectId === 'BASE') { pos = 0; needsCapture = false; }
+        
+        if (effectId === 'NEXT_OPP_6') {
+            const next = this.getNextTurn();
+            this.forcedRolls[next] = 6;
+            needsCapture = false;
+        }
 
         this.pieces[color][index] = pos;
         

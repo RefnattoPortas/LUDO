@@ -75,17 +75,6 @@ export class LudoAI {
             return this.logic.activePlayers.includes(p) && !isMe && !isFriendly;
         });
 
-        if (effectId === 'SELECT_MY_START_OR_6') {
-            const pieces = this.logic.pieces[color];
-            // Prefer starting if possible
-            const startIdx = pieces.findIndex(p => p === 0);
-            if (startIdx !== -1) return { color, index: startIdx };
-            // Else move the piece furthest ahead
-            const maxP = Math.max(...pieces.filter(p => p < 57));
-            targetIndex = pieces.indexOf(maxP);
-            return { color, index: (targetIndex === -1 ? 0 : targetIndex) };
-        }
-
         if (effectId === 'SELECT_OPP_BASE') {
             // Target the opponent piece closest to finishing (but on board)
             let maxPos = -1;

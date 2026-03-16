@@ -132,6 +132,7 @@ export class GameScene extends Phaser.Scene {
         }
 
         this.isVisualAnimating = false;
+        this.pendingOnlineState = null;
         this.startTurnTimer();
     }
 
@@ -215,6 +216,12 @@ export class GameScene extends Phaser.Scene {
 
     onOnlineUpdate(state) {
         if (!state) return;
+
+        if (this.isVisualAnimating) {
+            console.log("[REALTIME] Busy animating. Queuing state update.");
+            this.pendingOnlineState = state;
+            return;
+        }
         
         // Who initiated this state change?
         const isMyAction = (this.mode !== 'ONLINE' || this.logic.turn === this.playerColor);
@@ -326,8 +333,18 @@ export class GameScene extends Phaser.Scene {
         }
 
         this.startTurnTimer();
-        this.isVisualAnimating = false;
+        this.releaseVisualLock();
         this.checkAITurn(); 
+    }
+
+    releaseVisualLock() {
+        this.isVisualAnimating = false;
+        if (this.pendingOnlineState) {
+            console.log("[REALTIME] Releasing lock. Processing pending state.");
+            const state = this.pendingOnlineState;
+            this.pendingOnlineState = null;
+            this.onOnlineUpdate(state);
+        }
     }
 
     drawBoard() {
@@ -749,7 +766,7 @@ export class GameScene extends Phaser.Scene {
             if (forceAI || this.aiPlayers.includes(this.logic.turn)) {
                 this.time.delayedCall(600, () => this.handleAIMove());
             } else {
-                this.isVisualAnimating = false; // Release for human to pick piece
+                this.releaseVisualLock(); // Release for human to pick piece
                 this.highlightPossibleMoves();
             }
         });
@@ -1056,7 +1073,7 @@ export class GameScene extends Phaser.Scene {
                  this.resetDice();
                  this.updateStatusText();
                  this.startTurnTimer();
-                 this.isVisualAnimating = false;
+                 this.releaseVisualLock();
                  this.checkAITurn();
             });
         } else {
@@ -1066,7 +1083,7 @@ export class GameScene extends Phaser.Scene {
                 this.resetDice();
                 this.updateStatusText();
                 this.startTurnTimer();
-                this.isVisualAnimating = false;
+                this.releaseVisualLock();
                 this.checkAITurn();
             });
         }
@@ -1114,6 +1131,7 @@ export class GameScene extends Phaser.Scene {
         this.add.tween({ targets: cardCont, scale: 1, duration: 400, ease: 'Back.easeOut' });
         
         this.time.delayedCall(2500, () => {
+             bgOverlay.disableInteractive(); // Permite cliques nos pinos durante o encolhimento
              this.add.tween({ targets: cardCont, scale: 0, duration: 300, ease: 'Back.easeIn', onComplete: () => {
                   cardCont.destroy();
                   
@@ -1132,6 +1150,7 @@ export class GameScene extends Phaser.Scene {
                        } else {
                            // Human selects target
                            this.logic.gameState = 'WAITING_FOR_SELECTION';
+                           this.releaseVisualLock(); // RELEASE LOCK FOR SELECTION
                            this.pendingSelection = { effectId: cardData.id, actorColor: color };
                            this.highlightSelectionTargets(cardData.id, color);
                            this.showTemporaryMessage(color, 'Selecione um pino alvo!');
@@ -1491,7 +1510,7 @@ export class GameScene extends Phaser.Scene {
             if (this.logic.gameState === 'WAITING_FOR_ROLL') {
                 this.resetDice();
             }
-            this.isVisualAnimating = false;
+            this.releaseVisualLock();
             this.checkAITurn();
         }
     }
@@ -1708,6 +1727,7 @@ export class GameScene extends Phaser.Scene {
         this.startTurnTimer();
         this.updateStatusText();
         this.resetDice();
+        this.releaseVisualLock();
         this.checkAITurn();
     }
 
